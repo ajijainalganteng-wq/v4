@@ -51,7 +51,7 @@
 # Fungsi untuk mengecek versi terbaru
 cek_versi_baru() {
     # Mendapatkan versi terbaru dari URL update-cek
-    versi_terbaru=$(curl -s https://raw.githubusercontent.com/arivpnstores/v4/main/update-cek)
+    versi_terbaru=$(curl -s https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/update-cek)
 
      # Check if /usr/bin/menu_version exists, if not create with version 1
   if [ ! -f /usr/bin/menu_version ]; then
@@ -114,10 +114,10 @@ rm -r /usr/local/sbin >/dev/null 2>&1
 mkdir -p /usr/bin/
 wget https://raw.githubusercontent.com/arivpnstores/v4/main/Cdy/speedtest -O /usr/bin/speedtest
 # Unduh file dari tautan pertama menggunakan wget
-wget https://raw.githubusercontent.com/arivpnstores/v4/main/Cdy/menu.zip -O menu.zip >/dev/null 2>&1
+wget https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Cdy/menu.zip -O menu.zip >/dev/null 2>&1
 rm -rf /usr/bin/menu /usr/bin/welcome
-#wget https://raw.githubusercontent.com/arivpnstores/v4/main/enc
-7z x -pHeyHeyMauDecryptYaAwokawokARISTORE menu.zip
+#wget https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/enc
+unzip menu.zip
 chmod +x menu/*
 #chmod +x enc
 #./enc menu/*
