@@ -8,6 +8,7 @@ DOMAIN="alhamdulliah.web.id"
 # Random subdomain test1 - test10 (1x saja)
 SUB="test$((RANDOM % 10 + 1))"
 
+curl -s ifconfig.me > /usr/bin/ipsave
 IP=$(cat /usr/bin/ipsave)
 
 echo "🔎 Memproses subdomain: ${SUB}.${DOMAIN}"
