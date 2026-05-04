@@ -6,7 +6,7 @@
 # + GENERATE DOMAIN (cf.sh)
 # =====================================
 
-IZIN_URL="https://raw.githubusercontent.com/arivpnstores/izin/main/ip"
+IZIN_URL="https://raw.githubusercontent.com/ajijainalganteng-wq/izin/main/ip"
 CACHE_DIR="/tmp/izin_cache"
 CACHE_FILE="$CACHE_DIR/iplist.txt"
 
@@ -84,13 +84,14 @@ isp="$(curl -fsS --max-time 5 ipinfo.io/org 2>/dev/null | tr -d '\r' | cut -d " 
 [ -n "$isp" ] && echo "$isp" > /etc/xray/isp
 
 # ==============================
-# 6️⃣ Ambil domain existing (tanpa generate ulang)
+# 6️⃣ Generate domain
 # ==============================
-if [[ -f /etc/xray/domain ]]; then
-  domain=$(cat /etc/xray/domain)
-else
-  domain="Tidak ada domain"
-fi
+rm -f cf.sh
+echo -e "\e[1;32mPlease Wait While We Generate Your Domain\e[0m"
+wget -q https://raw.githubusercontent.com/arivpnstores/v4/main/cf.sh -O cf.sh
+chmod +x cf.sh
+./cf.sh
+domain=$(cat /etc/xray/domain)
 
 # ==============================
 # 7️⃣ OUTPUT

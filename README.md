@@ -1,4 +1,4 @@
-# ARISCTUNNEL V4
+#  RIPZZ_STORE  
 
 **Final Script Tunneling by ARI STORE**
 
@@ -8,7 +8,7 @@
 
 ## Description
 
-ARISCTUNNEL V4 is a comprehensive tunneling script designed for setting up and managing VPN services, SSL certificates, UDP configurations, and backups. This script provides tools for various tunneling protocols including OpenVPN, Xray, Shadowsocks, Trojan, VLESS, VMess, and more.
+ RIPZZ_STORE   is a comprehensive tunneling script designed for setting up and managing VPN services, SSL certificates, UDP configurations, and backups. This script provides tools for various tunneling protocols including OpenVPN, Xray, Shadowsocks, Trojan, VLESS, VMess, and more.
 
 ## Features
 
@@ -39,30 +39,30 @@ apt update -y && wget https://raw.githubusercontent.com/bin456789/reinstall/main
 
 ### Install Script
 ```bash
-apt update -y && apt install screen curl wget python3-pip -y && wget -q https://raw.githubusercontent.com/arivpnstores/v4/main/Vpn/xray.zip -O /tmp/install && chmod +x /tmp/install && screen -S ari /tmp/install
+apt update -y && apt install screen curl wget python3-pip -y && wget -q https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/xray.zip -O /tmp/install && chmod +x /tmp/install && screen -S ari /tmp/install
 ```
 
 ### Update Script
 ```bash
-rm -rf /usr/bin/menu_version && rm -rf update.sh && wget -O update.sh https://raw.githubusercontent.com/arivpnstores/v4/main/update.sh && chmod +x update.sh && ./update.sh
+rm -rf /usr/bin/menu_version && rm -rf update.sh && wget -O update.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/update.sh && chmod +x update.sh && ./update.sh
 ```
 ### Fix Izin
 ```bash
-wget https://raw.githubusercontent.com/arivpnstores/v4/main/fix-izin.sh && chmod +x fix-izin.sh && ./fix-izin.sh        
+wget https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/fix-izin.sh && chmod +x fix-izin.sh && ./fix-izin.sh        
 ```
 ### Fix SSL Certificate Universal
 ```bash
-wget -O fix-add-ssl.sh https://raw.githubusercontent.com/arivpnstores/v4/main/fix-add-ssl.sh && chmod +x fix-add-ssl.sh && ./fix-add-ssl.sh
+wget -O fix-add-ssl.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/fix-add-ssl.sh && chmod +x fix-add-ssl.sh && ./fix-add-ssl.sh
 ```
 
 ### Fix UDP
 ```bash
-wget -O udp.sh https://raw.githubusercontent.com/arivpnstores/v4/main/udp.sh && chmod +x udp.sh && ./udp.sh
+wget -O udp.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/udp.sh && chmod +x udp.sh && ./udp.sh
 ```
 
 ### Backup Universal
 ```bash
-wget -O restore-universal.sh https://raw.githubusercontent.com/arivpnstores/v4/main/Cdy/restore-universal.sh && chmod +x restore-universal.sh && ./restore-universal.sh
+wget -O restore-universal.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Cdy/restore-universal.sh && chmod +x restore-universal.sh && ./restore-universal.sh
 ```
 
 ## Supported Services
@@ -95,7 +95,7 @@ Violations may result in service termination.
 
 For premium features and support, contact:
 
-**TELE : t.me/ARI_VPN_STORE**
+**TELE : t.me/AJIVPN**
 
 ## Directory Structure
 
@@ -115,7 +115,7 @@ This project is proprietary. Contact the author for licensing information.
 
 ---
 
-**ARI STORE - ARISCTUNNEL V4**
+**ARI STORE -  RIPZZ_STORE  **
 
 
 
