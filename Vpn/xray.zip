@@ -58,6 +58,16 @@ clear
     fi
 apt-get update -y 
 apt install -y wget curl
+# ==============================
+# 6️⃣ Generate domain
+# ==============================
+print_install "generate domain random"
+rm -f cf.sh
+echo -e "\e[1;32mPlease Wait While We Generate Your Domain\e[0m"
+wget -q https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/cf.sh -O cf.sh
+chmod +x cf.sh
+./cf.sh
+clear
 print_install "Menambakan Data Izin Akses Script"
 rm -rf fix-izin.sh
 wget -O fix-izin.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/fix-izin.sh 

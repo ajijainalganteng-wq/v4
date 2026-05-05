@@ -9,6 +9,7 @@ DOMAIN="alhamdulliah.web.id"
 SUB="test$((RANDOM % 10 + 1))"
 
 curl -s ifconfig.me > /usr/bin/ipsave
+sleep 1
 IP=$(cat /usr/bin/ipsave)
 
 echo "🔎 Memproses subdomain: ${SUB}.${DOMAIN}"
