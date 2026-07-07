@@ -255,14 +255,24 @@ auto_system() {
 clear
 function pasang_ssl() {
 # ==============================
-# 6️⃣ Generate domain
+# 6️⃣ Input Domain Manual
 # ==============================
-print_install "generate domain random"
-echo -e "\e[1;32mPlease Wait While We Generate Your Domain\e[0m"
-wget -q https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/cf.sh -O cf.sh
-chmod +x cf.sh
-./cf.sh
-rm -f cf.sh
+while true; do
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    read -rp "Masukkan Domain VPS: " DOMAIN
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [[ -n "$DOMAIN" ]]; then
+        echo "$DOMAIN" > /root/domain
+        mkdir -p /etc/xray
+        echo "$DOMAIN" > /etc/xray/domain
+        echo ""
+        echo "Domain berhasil disimpan: $DOMAIN"
+        sleep 2
+        break
+    else
+        echo "Domain tidak boleh kosong, silakan masukkan kembali."
+    fi
+done
 clear
 print_install "Memasang SSL Pada Domain"
 rm -rf /etc/xray/xray.key
@@ -1399,14 +1409,7 @@ END
         echo "$pekerjaan_cron" > "$cron_file"
     fi
 
-# Fungsi untuk menambahkan pekerjaan cron ke /etc/cron.d/
-    cron_file="/etc/cron.d/auto_update2"
-    pekerjaan_cron="15 2 * * * root /usr/bin/auto_update2"
 
-    # Periksa apakah pekerjaan cron sudah ada di file
-    if ! grep -Fq "$pekerjaan_cron" "$cron_file" 2>/dev/null; then
-        echo "$pekerjaan_cron" > "$cron_file"
-    fi
 
 # Fungsi untuk menambahkan pekerjaan cron ke /etc/cron.d/
     cron_file="/etc/cron.d/backup_otomatis"

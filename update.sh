@@ -20,14 +20,7 @@
         echo "$pekerjaan_cron" > "$cron_file"
     fi
 
-# Fungsi untuk menambahkan pekerjaan cron ke /etc/cron.d/
-    cron_file="/etc/cron.d/auto_update2"
-    pekerjaan_cron="15 2 * * * root /usr/bin/auto_update2"
 
-    # Periksa apakah pekerjaan cron sudah ada di file
-    if ! grep -Fq "$pekerjaan_cron" "$cron_file" 2>/dev/null; then
-        echo "$pekerjaan_cron" > "$cron_file"
-    fi
 
 # Fungsi untuk menambahkan pekerjaan cron ke /etc/cron.d/
     cron_file="/etc/cron.d/backup_otomatis"
