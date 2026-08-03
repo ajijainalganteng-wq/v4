@@ -1,12 +1,12 @@
 [Unit]
-Description=Automatically
-After=network.target
+Description=Limit Usage Xray Service
+Documentation=FighterTunnel
+After=syslog.target network-online.target
 
 [Service]
-Type=simple
-ExecStartPre=-/usr/bin/mkdir -p /var/run/xray
-ExecStart=/usr/bin/chown www-data:www-data /var/run/xray
-Restart=on-abort
+User=root
+NoNewPrivileges=true
+ExecStart=/usr/local/sbin/limit-ip trip
 
 [Install]
 WantedBy=multi-user.target
