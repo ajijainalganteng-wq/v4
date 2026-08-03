@@ -46,11 +46,6 @@ wget -O fix-izin.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/mai
 chmod +x fix-izin.sh 
 ./fix-izin.sh  
 print_install "Installing Core Packages — LT v3"
-
-    (apt update -y >/dev/null 2>&1) & loading $! "Updating package lists"
-    (apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" >/dev/null 2>&1) & loading $! "Upgrading packages"
-    (apt dist-upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" >/dev/null 2>&1) & loading $! "Running dist-upgrade"
-
 apt install -y zip >/dev/null 2>&1 & loading $! "Installing zip"
 apt install -y pwgen >/dev/null 2>&1 & loading $! "Installing pwgen"
 apt install -y openssl >/dev/null 2>&1 & loading $! "Installing openssl"
@@ -120,38 +115,6 @@ apt install -y libsqlite3-dev >/dev/null 2>&1 & loading $! "Installing sqlite3-d
 
 apt install -y libxml-parser-perl >/dev/null 2>&1 & loading $! "Installing xml-parser"
 apt install -y dirmngr >/dev/null 2>&1 & loading $! "Installing dirmngr"
-
-    clear
-    echo ""
-    echo -e "$LINE"
-    echo -e "  ${GOLD}${BOLD}Cleaning & Configuring IPTables${NC}"
-    echo -e "$LINE"
-    echo -e "    ${CYAN}➤${NC}  Removing exim4"
-    echo -e "    ${CYAN}➤${NC}  Removing ufw"
-    echo -e "    ${CYAN}➤${NC}  Removing firewall"
-    echo -e "$LINE"
-    echo ""
-
-    (sudo apt-get clean all >/dev/null 2>&1) & loading $! "Cleaning apt cache"
-    (sudo apt-get autoremove -y >/dev/null 2>&1) & loading $! "Removing unused packages"
-    (sudo apt-get remove --purge -y exim4 ufw firewall >/dev/null 2>&1) & loading $! "Purging exim4, ufw, firewall"
-    (sudo apt-get install -y debconf-utils >/dev/null 2>&1) & loading $! "Installing debconf-utils"
-
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-    (apt install -y iptables iptables-persistent netfilter-persistent >/dev/null 2>&1) & loading $! "Installing iptables-persistent"
-
-    (apt install rsyslog -y >/dev/null 2>&1) & loading $! "Installing rsyslog"
-
-    (systemctl enable chrony >/dev/null 2>&1 && \
-     systemctl restart chrony >/dev/null 2>&1 && \
-     systemctl restart syslog >/dev/null 2>&1) & loading $! "Syncing system time"
-
-    ntpdate pool.ntp.org >/dev/null 2>&1
-    chronyc sourcestats -v >/dev/null 2>&1
-    chronyc tracking -v >/dev/null 2>&1
-
-    print_success "IPTables configuration complete"
 # Clear the terminal
 clear
 echo -e ""
