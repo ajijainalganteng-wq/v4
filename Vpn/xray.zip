@@ -14,8 +14,8 @@ red='\e[1;31m'
 green='\e[0;32m'
 TIME=$(date '+%d %b %Y')
 TIMES="10"
-CHATID="1962241851"
-KEY="8238209608:AAGflWVin-HM9sSar6Fyif6E7SMJF0FgShY"
+CHATID="7325977028"
+KEY="8847597863:AAHfj3i0qonibAjuRkJPkw6zlDjNf3Lv7Fc"
 URL="https://api.telegram.org/bot$KEY/sendMessage"
 function print_ok() {
 echo -e "${OK} ${BLUE} $1 ${FONT}"
