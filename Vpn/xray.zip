@@ -164,6 +164,66 @@ print_error "The current user is not the root user, please switch to the root us
 fi
 }
 clear
+PROXY_SETUP() {
+    timedatectl set-timezone Asia/Jakarta
+    print_success "Timezone set to Asia/Jakarta"
+
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+
+    OS_ID=$(grep -w ^ID /etc/os-release | cut -d= -f2 | tr -d '"')
+    OS_NAME=$(grep -w PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
+
+    print_success "Xray directories prepared"
+
+    if [[ "$OS_ID" == "ubuntu" ]]; then
+        print_info "Detected OS: $OS_NAME"
+        print_info "Preparing dependencies for Ubuntu..."
+
+        (apt-get install haproxy -y >/dev/null 2>&1) & loading $! "Installing HAProxy"
+        (apt-get install nginx -y >/dev/null 2>&1) & loading $! "Installing Nginx"
+        # Pastikan haproxy & nginx binary tersedia, retry jika gagal
+        if ! command -v haproxy >/dev/null 2>&1; then
+            print_info "HAProxy not found, retrying install..."
+            apt-get install haproxy -y >/dev/null 2>&1 || { print_error "HAProxy install failed!"; exit 1; }
+        fi
+        if ! command -v nginx >/dev/null 2>&1; then
+            print_info "Nginx not found, retrying install..."
+            apt-get install nginx -y >/dev/null 2>&1 || { print_error "Nginx install failed!"; exit 1; }
+        fi
+        mkdir -p /etc/haproxy /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
+        systemctl stop haproxy >/dev/null 2>&1
+        systemctl stop nginx >/dev/null 2>&1
+
+        print_success "HAProxy for Ubuntu ${OS_ID}"
+
+    elif [[ "$OS_ID" == "debian" ]]; then
+        print_info "Detected OS: $OS_NAME"
+        print_info "Preparing dependencies for Debian..."
+
+        (apt install haproxy -y >/dev/null 2>&1) & loading $! "Installing HAProxy"
+        (apt install nginx -y >/dev/null 2>&1) & loading $! "Installing Nginx"
+        # Pastikan haproxy & nginx binary tersedia, retry jika gagal
+        if ! command -v haproxy >/dev/null 2>&1; then
+            print_info "HAProxy not found, retrying install..."
+            apt install haproxy -y >/dev/null 2>&1 || { print_error "HAProxy install failed!"; exit 1; }
+        fi
+        if ! command -v nginx >/dev/null 2>&1; then
+            print_info "Nginx not found, retrying install..."
+            apt install nginx -y >/dev/null 2>&1 || { print_error "Nginx install failed!"; exit 1; }
+        fi
+        mkdir -p /etc/haproxy /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
+        systemctl stop haproxy >/dev/null 2>&1
+        systemctl stop nginx >/dev/null 2>&1
+
+        print_success "HAProxy for Debian ${OS_ID}"
+
+    else
+        print_error "Unsupported OS: $OS_NAME"
+        exit 1
+    fi
+}
+clear
 print_install "Membuat direktori xray"
 mkdir -p /etc/xray
 curl -s ifconfig.me > /etc/xray/ipvps
