@@ -45,235 +45,141 @@ rm -rf fix-izin.sh
 wget -O fix-izin.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/fix-izin.sh 
 chmod +x fix-izin.sh 
 ./fix-izin.sh  
-print_install "Installing Core Packages — LT v3"
-apt install -y zip >/dev/null 2>&1 & loading $! "Installing zip"
-apt install -y pwgen >/dev/null 2>&1 & loading $! "Installing pwgen"
-apt install -y openssl >/dev/null 2>&1 & loading $! "Installing openssl"
-apt install -y cron >/dev/null 2>&1 & loading $! "Installing cron"
-apt install -y bash-completion >/dev/null 2>&1 & loading $! "Installing bash-completion"
-apt install -y sudo >/dev/null 2>&1 & loading $! "Installing sudo"
+(apt update -y >/dev/null 2>&1) & loading $! "Updating package lists"
+(apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" >/dev/null 2>&1) & loading $! "Upgrading installed packages"
+(apt install git -y >/dev/null 2>&1) & loading $! "Installing git"
+(apt install at -y >/dev/null 2>&1) & loading $! "Installing at"
+(apt install jq -y >/dev/null 2>&1) & loading $! "Installing jq"
+(apt install lolcat -y >/dev/null 2>&1) & loading $! "Installing lolcat"
+(apt install ruby rubygems -y >/dev/null 2>&1) & loading $! "Installing ruby & rubygems"
+(gem install lolcat --no-document >/dev/null 2>&1) & loading $! "Installing lolcat gem"
+(apt install dos2unix -y >/dev/null 2>&1) & loading $! "Installing dos2unix"
+(apt install python3 -y >/dev/null 2>&1) & loading $! "Installing python3"
+(apt install socat -y >/dev/null 2>&1) & loading $! "Installing socat"
+(apt install netcat -y >/dev/null 2>&1) & loading $! "Installing netcat"
+(apt install ufw -y >/dev/null 2>&1) & loading $! "Installing ufw"
+(apt install telnet -y >/dev/null 2>&1) & loading $! "Installing telnet"
+(apt install speedtest-cli -y >/dev/null 2>&1) & loading $! "Installing speedtest (Ookla)"
+(apt install vnstat -y >/dev/null 2>&1) & loading $! "Installing vnstat"
+(apt install nodejs -y >/dev/null 2>&1) & loading $! "Installing Node.js LTS"
+(apt install npm -y >/dev/null 2>&1) & loading $! "Installing npm"
+(npm install -g pm2  >/dev/null 2>&1) & loading $! "Installing pm2"
+(apt install dropbear -y >/dev/null 2>&1) & loading $! "Installing Dropbear"
+(apt install rclone -y >/dev/null 2>&1) & loading $! "Installing rclone"
 
-apt install -y unzip >/dev/null 2>&1 & loading $! "Installing unzip"
-apt install -y p7zip-full >/dev/null 2>&1 & loading $! "Installing p7zip"
-apt install -y screen >/dev/null 2>&1 & loading $! "Installing screen"
-apt install -y cmake >/dev/null 2>&1 & loading $! "Installing cmake"
-apt install -y make >/dev/null 2>&1 & loading $! "Installing make"
-apt install -y build-essential >/dev/null 2>&1 & loading $! "Installing build-essential"
+mkdir -p /root/.acme.sh
+(curl -s https://raw.githubusercontent.com/acmesh-official/acme.sh/master/acme.sh -o /root/.acme.sh/acme.sh) & loading $! "Downloading acme.sh"
+chmod +x /root/.acme.sh/acme.sh
 
-apt install -y gnupg >/dev/null 2>&1 & loading $! "Installing gnupg"
-apt install -y gnupg2 >/dev/null 2>&1 & loading $! "Installing gnupg2"
-apt install -y gnupg1 >/dev/null 2>&1 & loading $! "Installing gnupg1"
-apt install -y apt-transport-https >/dev/null 2>&1 & loading $! "Installing apt-transport-https"
-apt install -y lsb-release >/dev/null 2>&1 & loading $! "Installing lsb-release"
-apt install -y jq >/dev/null 2>&1 & loading $! "Installing jq"
+# buat ubuntu 22 dan 25
+(apt install netcat-traditional -y >/dev/null 2>&1) & loading $! "Installing netcat-traditional"
+(apt install netcat-openbsd -y >/dev/null 2>&1) & loading $! "Installing netcat-openbsd"
 
-apt install -y htop >/dev/null 2>&1 & loading $! "Installing htop"
-apt install -y lsof >/dev/null 2>&1 & loading $! "Installing lsof"
-apt install -y tar >/dev/null 2>&1 & loading $! "Installing tar"
-apt install -y dnsutils >/dev/null 2>&1 & loading $! "Installing dnsutils"
+IPVPS=$(curl -sS ipv4.icanhazip.com)
+export IP=$(curl -sS icanhazip.com)
 
-apt install -y python3-pip >/dev/null 2>&1 & loading $! "Installing pip"
-apt install -y python-is-python3 >/dev/null 2>&1 & loading $! "Installing python alias"
+# Deteksi interface jaringan utama (dipakai oleh vnSTATS_SETUP)
+NET=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
+[[ -z "$NET" ]] && NET="eth0"
 
-apt install -y ca-certificates >/dev/null 2>&1 & loading $! "Installing ca-certificates"
-apt install -y bsd-mailx >/dev/null 2>&1 & loading $! "Installing mailx"
-apt install -y msmtp-mta >/dev/null 2>&1 & loading $! "Installing msmtp"
+function ADD_CEEF() {
+EMAILCF="newvpnlunatix293@gmail.com"
+KEYCF="88a8619c3dec8a0c9a14cf353684036108844"
+echo "$EMAILCF" > /usr/bin/emailcf
+echo "$KEYCF" > /usr/bin/keycf
+}
 
-apt install -y ntpdate >/dev/null 2>&1 & loading $! "Installing ntpdate"
-apt install -y chrony >/dev/null 2>&1 & loading $! "Installing chrony"
-apt install -y easy-rsa >/dev/null 2>&1 & loading $! "Installing easy-rsa"
-apt install -y openvpn >/dev/null 2>&1 & loading $! "Installing openvpn"
+function check_os_version() {
+    local os_id os_version
 
-apt install -y net-tools >/dev/null 2>&1 & loading $! "Installing net-tools"
-apt install -y rsyslog >/dev/null 2>&1 & loading $! "Installing rsyslog"
-apt install -y sed >/dev/null 2>&1 & loading $! "Installing sed"
-apt install -y xz-utils >/dev/null 2>&1 & loading $! "Installing xz-utils"
-apt install -y libc6 >/dev/null 2>&1 & loading $! "Installing libc6"
-apt install -y util-linux >/dev/null 2>&1 & loading $! "Installing util-linux"
+    os_id=$(grep -w ID /etc/os-release | cut -d= -f2 | tr -d '"')
+    os_version=$(grep -w VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"')
 
-apt install -y shc >/dev/null 2>&1 & loading $! "Installing shc"
-apt install -y gcc >/dev/null 2>&1 & loading $! "Installing gcc"
-apt install -y g++ >/dev/null 2>&1 & loading $! "Installing g++"
+    case "$os_id" in
+        ubuntu)
+            case "$os_version" in
+                20.04|22.04|22.10|23.04|24.04|24.10|25.04|25.10|26.04|26.10)
+                    print_ok "OS Supported: Ubuntu $os_version"
+                    ;;
+                *)
+                    print_error "Ubuntu $os_version is not supported."
+                    exit 1
+                    ;;
+            esac
+            ;;
+        debian)
+            case "$os_version" in
+                10|11|12|13|14|15)
+                    print_ok "OS Supported: Debian $os_version"
+                    ;;
+                *)
+                    print_error "Debian $os_version is not supported."
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            print_error "OS ($os_id $os_version) is not supported."
+            exit 1
+            ;;
+    esac
+}
 
-apt install -y libnss3-dev >/dev/null 2>&1 & loading $! "Installing libnss3-dev"
-apt install -y libnspr4-dev >/dev/null 2>&1 & loading $! "Installing libnspr4-dev"
-apt install -y pkg-config >/dev/null 2>&1 & loading $! "Installing pkg-config"
-apt install -y libpam0g-dev >/dev/null 2>&1 & loading $! "Installing libpam"
-apt install -y libcap-ng-dev >/dev/null 2>&1 & loading $! "Installing libcap-ng-dev"
-apt install -y libcap-ng-utils >/dev/null 2>&1 & loading $! "Installing libcap-ng-utils"
-apt install -y libselinux1-dev >/dev/null 2>&1 & loading $! "Installing libselinux"
-
-apt install -y libcurl4-nss-dev >/dev/null 2>&1 & loading $! "Installing libcurl"
-apt install -y flex >/dev/null 2>&1 & loading $! "Installing flex"
-apt install -y bison >/dev/null 2>&1 & loading $! "Installing bison"
-
-apt install -y libnss3-tools >/dev/null 2>&1 & loading $! "Installing libnss3-tools"
-apt install -y libevent-dev >/dev/null 2>&1 & loading $! "Installing libevent"
-apt install -y zlib1g-dev >/dev/null 2>&1 & loading $! "Installing zlib"
-apt install -y libssl-dev >/dev/null 2>&1 & loading $! "Installing ssl-dev"
-apt install -y libsqlite3-dev >/dev/null 2>&1 & loading $! "Installing sqlite3-dev"
-
-apt install -y libxml-parser-perl >/dev/null 2>&1 & loading $! "Installing xml-parser"
-apt install -y dirmngr >/dev/null 2>&1 & loading $! "Installing dirmngr"
-# Clear the terminal
-clear
-echo -e ""
-if [[ $( uname -m | awk '{print $1}' ) == "x86_64" ]]; then
-echo -e "${OK} Your Architecture Is Supported ( ${green}$( uname -m )${NC} )"
+if [[ $(uname -m) == "x86_64" ]]; then
+    print_ok "Architecture Supported: $(uname -m)"
 else
-echo -e "${EROR} Your Architecture Is Not Supported ( ${YELLOW}$( uname -m )${NC} )"
-exit 1
+    print_error "Architecture Not Supported: $(uname -m)"
+    exit 1
 fi
-if [[ $( cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g' ) == "ubuntu" ]]; then
-echo -e "${OK} Your OS Is Supported ( ${green}$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g' )${NC} )"
-elif [[ $( cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g' ) == "debian" ]]; then
-echo -e "${OK} Your OS Is Supported ( ${green}$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g' )${NC} )"
-else
-echo -e "${EROR} Your OS Is Not Supported ( ${YELLOW}$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g' )${NC} )"
-exit 1
-fi
-if [[ $ipsaya == "" ]]; then
-echo -e "${EROR} IP Address ( ${RED}Not Detected${NC} )"
-else
-echo -e "${OK} IP Address ( ${green}$IP${NC} )"
-fi
-echo ""
-echo "Process ${GRAY}[ ${NC}${green}Install${NC} ${GRAY}]${NC} For Starting Installation "
-echo ""
-clear
+
+# Cek versi OS
+check_os_version
+
 if [ "${EUID}" -ne 0 ]; then
-echo "You need to run this script as root"
-exit 1
+   print_error "You need to run this script as root"
+   exit 1
 fi
 if [ "$(systemd-detect-virt)" == "openvz" ]; then
-echo "OpenVZ is not supported"
-exit 1
+   print_error "OpenVZ is not supported"
+   exit 1
 fi
-echo -e "\e[32mloading...\e[0m"
-clear
-REPO="https://raw.githubusercontent.com/arivpnstores/v4/main/"
-start=$(date +%s)
-secs_to_human() {
-echo "Installation time : $((${1} / 3600)) hours $(((${1} / 60) % 60)) minute's $((${1} % 60)) seconds"
-}
-function is_root() {
-if [[ 0 == "$UID" ]]; then
-print_ok "Root user Start installation process"
-else
-print_error "The current user is not the root user, please switch to the root user and run the script again"
-fi
-}
-clear
-PROXY_SETUP() {
-    timedatectl set-timezone Asia/Jakarta
-    print_success "Timezone set to Asia/Jakarta"
 
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+# ══════════════════════════════════════════════
+#              PERSIAPAN SISTEM XRAY
+# ══════════════════════════════════════════════
+print_install "Creating Directories & Xray Configuration"
 
-    OS_ID=$(grep -w ^ID /etc/os-release | cut -d= -f2 | tr -d '"')
-    OS_NAME=$(grep -w PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')
-
-    print_success "Xray directories prepared"
-
-    if [[ "$OS_ID" == "ubuntu" ]]; then
-        print_info "Detected OS: $OS_NAME"
-        print_info "Preparing dependencies for Ubuntu..."
-
-        (apt-get install haproxy -y >/dev/null 2>&1) & loading $! "Installing HAProxy"
-        (apt-get install nginx -y >/dev/null 2>&1) & loading $! "Installing Nginx"
-        # Pastikan haproxy & nginx binary tersedia, retry jika gagal
-        if ! command -v haproxy >/dev/null 2>&1; then
-            print_info "HAProxy not found, retrying install..."
-            apt-get install haproxy -y >/dev/null 2>&1 || { print_error "HAProxy install failed!"; exit 1; }
-        fi
-        if ! command -v nginx >/dev/null 2>&1; then
-            print_info "Nginx not found, retrying install..."
-            apt-get install nginx -y >/dev/null 2>&1 || { print_error "Nginx install failed!"; exit 1; }
-        fi
-        mkdir -p /etc/haproxy /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
-        systemctl stop haproxy >/dev/null 2>&1
-        systemctl stop nginx >/dev/null 2>&1
-
-        print_success "HAProxy for Ubuntu ${OS_ID}"
-
-    elif [[ "$OS_ID" == "debian" ]]; then
-        print_info "Detected OS: $OS_NAME"
-        print_info "Preparing dependencies for Debian..."
-
-        (apt install haproxy -y >/dev/null 2>&1) & loading $! "Installing HAProxy"
-        (apt install nginx -y >/dev/null 2>&1) & loading $! "Installing Nginx"
-        # Pastikan haproxy & nginx binary tersedia, retry jika gagal
-        if ! command -v haproxy >/dev/null 2>&1; then
-            print_info "HAProxy not found, retrying install..."
-            apt install haproxy -y >/dev/null 2>&1 || { print_error "HAProxy install failed!"; exit 1; }
-        fi
-        if ! command -v nginx >/dev/null 2>&1; then
-            print_info "Nginx not found, retrying install..."
-            apt install nginx -y >/dev/null 2>&1 || { print_error "Nginx install failed!"; exit 1; }
-        fi
-        mkdir -p /etc/haproxy /etc/nginx/conf.d /etc/nginx/sites-available /etc/nginx/sites-enabled
-        systemctl stop haproxy >/dev/null 2>&1
-        systemctl stop nginx >/dev/null 2>&1
-
-        print_success "HAProxy for Debian ${OS_ID}"
-
-    else
-        print_error "Unsupported OS: $OS_NAME"
-        exit 1
-    fi
-}
-clear
-print_install "Membuat direktori xray"
 mkdir -p /etc/xray
 curl -s ifconfig.me > /etc/xray/ipvps
+touch /etc/xray/domain
+
 mkdir -p /var/log/xray
-chown www-data.www-data /var/log/xray
+id www-data >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin www-data
+chown www-data:www-data /var/log/xray
 chmod +x /var/log/xray
+
+echo ""
+echo -e "$LINE"
+echo -e "  ${GOLD}${BOLD}Creating Log Files${NC}"
+echo -e "$LINE"
+echo -e "    ${CYAN}➤${NC}  /var/log/xray/access.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/xray/error.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/auth.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/kern.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/mail.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/user.log"
+echo -e "    ${CYAN}➤${NC}  /var/log/cron.log"
+echo -e "$LINE"
+
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
-mkdir -p /var/lib/kyt >/dev/null 2>&1
-while IFS=":" read -r a b; do
-case $a in
-"MemTotal") ((mem_used+=${b/kB})); mem_total="${b/kB}" ;;
-"Shmem") ((mem_used+=${b/kB}))  ;;
-"MemFree" | "Buffers" | "Cached" | "SReclaimable")
-mem_used="$((mem_used-=${b/kB}))"
-;;
-esac
-done < /proc/meminfo
-Ram_Usage="$((mem_used / 1024))"
-Ram_Total="$((mem_total / 1024))"
-export tanggal=`date -d "0 days" +"%d-%m-%Y - %X" `
-export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/PRETTY_NAME//g' | sed 's/=//g' | sed 's/"//g' )
-export Kernel=$( uname -r )
-export Arch=$( uname -m )
-export IP=$( curl -s https://ipinfo.io/ip/ )
-function first_setup(){
-timedatectl set-timezone Asia/Jakarta
-echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-print_success "Directory Xray"
-if [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "ubuntu" ]]; then
-echo "Setup Dependencies $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
-sudo apt update -y
-apt-get install --no-install-recommends software-properties-common
-add-apt-repository ppa:vbernat/haproxy-2.0 -y
-apt-get -y install haproxy=2.0.\*
-elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "debian" ]]; then
-echo "Setup Dependencies For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
-curl https://haproxy.debian.net/bernat.debian.org.gpg |
-gpg --dearmor >/usr/share/keyrings/haproxy.debian.net.gpg
-echo deb "[signed-by=/usr/share/keyrings/haproxy.debian.net.gpg]" \
-http://haproxy.debian.net buster-backports-1.8 main \
->/etc/apt/sources.list.d/haproxy.list
-sudo apt-get update
-apt-get -y install haproxy=1.8.\*
-else
-echo -e " Your OS Is Not Supported ($(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g') )"
-exit 1
-fi
-}
+touch /var/log/auth.log
+touch /var/log/kern.log
+touch /var/log/mail.log
+touch /var/log/user.log
+touch /var/log/cron.log
+
+mkdir -p /var/lib/luna >/dev/null 2>&1}
 clear
 function nginx_install() {
 clear
