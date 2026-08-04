@@ -57,9 +57,10 @@ apt install gzip -y
 apt install xz-utils -y
 apt install jq curl -y
 apt install wondershaper -y
-apt install python3 -y >/dev/null 2>&1
+apt install ruby rubygems -y 
+apt install python3 -y 
 apt install lolcat -y
-gem install lolcat --no-document >/dev/null 2>&1
+gem install lolcat --no-document 
 apt install at -y
 apt install zip pwgen openssl netcat socat cron bash-completion -y
 apt install figlet -y
