@@ -64,6 +64,7 @@ gem install lolcat --no-document
 apt install at -y
 apt install zip pwgen openssl netcat socat cron bash-completion -y
 apt install figlet -y
+apt install netcat-traditional -y
 apt update -y
 apt upgrade -y
 apt dist-upgrade -y
