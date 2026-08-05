@@ -66,6 +66,8 @@ apt install figlet -y
 apt update -y
 apt upgrade -y
 apt dist-upgrade -y
+apt install netcat-traditional -y 
+apt install netcat-openbsd -y
 systemctl enable chronyd > /dev/null 2>&1
 systemctl restart chronyd > /dev/null 2>&1
 systemctl enable chrony > /dev/null 2>&1
