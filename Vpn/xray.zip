@@ -51,6 +51,7 @@ echo 'openssh-server openssh-server/keep-obsolete-conffile boolean true' | debco
 apt install -y
 apt upgrade -y
 apt update -y
+apt install git -y 
 apt install iputils-ping -y
 apt install bzip2 -y
 apt install gzip -y
