@@ -38,24 +38,7 @@ sleep 2
 fi
 }      
 clear
-    # Cek versi OS
-    . /etc/os-release
-
-    if [[ "$ID" != "ubuntu" || "$VERSION_ID" != "20.04" ]]; then
-        echo -e "\e[91m❌ OS saat ini ($PRETTY_NAME) bukan Ubuntu 20.04\e[0m"
-        echo "➡️ Menjalankan reinstall otomatis ke Ubuntu 20.04..."
-        
-        # Jalankan script reinstall via wget
-        apt update -y
-        wget https://raw.githubusercontent.com/bin456789/reinstall/main/reinstall.sh -O /tmp/reinstall.sh
-        chmod +x /tmp/reinstall.sh
-        bash /tmp/reinstall.sh ubuntu 20.04
-
-        # Hentikan script ini karena OS akan di-reinstall
-        reboot 
-    else
-        echo -e "\e[92m✔️ Deteksi OS berhasil: $PRETTY_NAME\e[0m"
-    fi
+fi
 apt-get update -y 
 apt install -y wget curl
 print_install "Menambakan Data Izin Akses Script"
