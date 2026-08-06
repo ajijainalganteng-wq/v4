@@ -56,7 +56,7 @@ apt install iputils-ping -y
 apt install bzip2 -y
 apt install gzip -y
 apt install xz-utils -y
-apt install jq -y
+apt install jq curl -y
 apt install python3 -y
 apt install socat -y 
 apt install netcat -y 
