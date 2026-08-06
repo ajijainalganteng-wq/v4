@@ -205,11 +205,20 @@ id www-data >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sb
 chown www-data:www-data /var/log/xray
 chmod +x /var/log/xray
 while IFS=":" read -r a b; do
-case $a in
-"MemTotal") ((mem_used+=${b/kB})); mem_total="${b/kB}" ;;
-"Shmem") ((mem_used+=${b/kB}))  ;;
-"MemFree" | "Buffers" | "Cached" | "SReclaimable")
-mem_used="$((mem_used-=${b/kB}))"
+    case $a in
+        "MemTotal")
+            ((mem_used+=${b/kB}))
+            mem_total="${b/kB}"
+            ;;
+        "Shmem")
+            ((mem_used+=${b/kB}))
+            ;;
+        "MemFree"|"Buffers"|"Cached"|"SReclaimable")
+            mem_used="$((mem_used-=${b/kB}))"
+            ;;
+    esac
+done < /proc/meminfo
+
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
 touch /var/log/auth.log
