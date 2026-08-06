@@ -196,39 +196,21 @@ print_error "The current user is not the root user, please switch to the root us
 fi
 }
 clear
-print_install "Creating Directories & Xray Configuration"
-
+print_install "Membuat direktori xray"
 mkdir -p /etc/xray
 curl -s ifconfig.me > /etc/xray/ipvps
-touch /etc/xray/domain
-
 mkdir -p /var/log/xray
-id www-data >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin www-data
-chown www-data:www-data /var/log/xray
+chown www-data.www-data /var/log/xray
 chmod +x /var/log/xray
-while IFS=":" read -r a b; do
-    case $a in
-        "MemTotal")
-            ((mem_used+=${b/kB}))
-            mem_total="${b/kB}"
-            ;;
-        "Shmem")
-            ((mem_used+=${b/kB}))
-            ;;
-        "MemFree"|"Buffers"|"Cached"|"SReclaimable")
-            mem_used="$((mem_used-=${b/kB}))"
-            ;;
-    esac
-done < /proc/meminfo
-
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
-touch /var/log/auth.log
-touch /var/log/kern.log
-touch /var/log/mail.log
-touch /var/log/user.log
-touch /var/log/cron.log
 mkdir -p /var/lib/kyt >/dev/null 2>&1
+while IFS=":" read -r a b; do
+case $a in
+"MemTotal") ((mem_used+=${b/kB})); mem_total="${b/kB}" ;;
+"Shmem") ((mem_used+=${b/kB}))  ;;
+"MemFree" | "Buffers" | "Cached" | "SReclaimable")
+mem_used="$((mem_used-=${b/kB}))"
 ;;
 esac
 done < /proc/meminfo
