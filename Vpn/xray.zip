@@ -321,7 +321,7 @@ echo "& plughin Account" >>/etc/trojan/.trojan.db
 echo "& plughin Account" >>/etc/shadowsocks/.shadowsocks.db
 echo "& plughin Account" >>/etc/ssh/.ssh.db
 }
-function XRAY_SETUP() {
+XRAY_SETUP() {
 clear
 print_install "Installing Xray Core v26"
 
