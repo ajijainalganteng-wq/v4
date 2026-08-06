@@ -206,6 +206,11 @@ chown www-data:www-data /var/log/xray
 chmod +x /var/log/xray
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
+touch /var/log/auth.log
+touch /var/log/kern.log
+touch /var/log/mail.log
+touch /var/log/user.log
+touch /var/log/cron.log
 mkdir -p /var/lib/kyt >/dev/null 2>&1
 while IFS=":" read -r a b; do
 case $a in
