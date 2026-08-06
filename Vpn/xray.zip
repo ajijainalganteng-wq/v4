@@ -132,11 +132,12 @@ secs_to_human() {
 echo "Installation time : $((${1} / 3600)) hours $(((${1} / 60) % 60)) minute's $((${1} % 60)) seconds"
 }
 function is_root() {
-if [[ 0 == "$UID" ]]; then
-print_ok "Root user Start installation process"
-else
-print_error "The current user is not the root user, please switch to the root user and run the script again"
-fi
+    if [[ $EUID -eq 0 ]]; then
+        print_ok "Running as root. Starting installation..."
+    else
+        print_error "This script must be run as root!"
+        exit 1
+    fi
 }
 clear
 print_install "Membuat direktori xray"
