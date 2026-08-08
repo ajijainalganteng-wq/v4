@@ -597,13 +597,19 @@ print_success "SSHD"
 clear
 function ins_dropbear(){
 clear
-print_install "Menginstall Dropbear"
-apt-get install dropbear -y > /dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
-chmod +x /etc/default/dropbear
-/etc/init.d/dropbear restart
-/etc/init.d/dropbear status
-print_success "Dropbear"
+print_install "Installing Dropbear v2019.78"
+
+   wget -q ${GIT_REPO}dropbear19.sh && chmod +x dropbear19.sh && ./dropbear19.sh >/dev/null 2>&1
+    
+   wget -qO- https://raw.githubusercontent.com/ajijainalganteng-wq/scripts/main/dropbear19.sh | sed 's/\r$//' | bash >/dev/null 2>&1
+   wget -q -O /etc/default/dropbear "${GIT_REPO}configure/dropbear.conf"
+
+    chmod +x /etc/default/dropbear
+    chmod 600 /etc/default/dropbear
+
+    (/etc/init.d/dropbear restart >/dev/null 2>&1
+
+    print_success "Dropbear installed"
 }
 clear
 function ins_vnstat(){
