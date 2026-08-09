@@ -102,21 +102,28 @@ chmod +x fix-izin.sh
 print_install "Menginstall Packet Yang Dibutuhkan"
 export DEBIAN_FRONTEND=noninteractive
 echo 'openssh-server openssh-server/keep-obsolete-conffile boolean true' | debconf-set-selections
-apt install -y
-apt upgrade -y
-apt update -y
+apt update -y >/dev/null 2>&1) & loading $! "Updating package lists"
+apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" 
+apt install git -y 
+apt install at -y
+apt install jq -y 
+apt install lolcat -y 
+apt install ruby rubygems -y
+gem install lolcat --no-document 
+apt install dos2unix -y
+apt install python3 -y 
+apt install socat -y 
+apt install netcat -y 
+apt install ufw -y 
+apt install telnet -y 
 apt install iputils-ping -y
 apt install bzip2 -y
 apt install gzip -y
 apt install xz-utils -y
-apt install jq curl -y
-apt install dos2unix -y
-apt install python3 -y
 apt install wondershaper -y
 apt install lolcat -y
 gem install lolcat -y
 apt install ruby rubygems -y 
-apt install at -y
 apt install zip pwgen openssl netcat socat cron bash-completion -y
 apt install figlet -y
 apt update -y
@@ -472,20 +479,17 @@ cat > /etc/systemd/system/rc-local.service <<EOF
 Description=/etc/rc.local compatibility
 ConditionPathExists=/etc/rc.local
 After=network.target
-
 [Service]
 Type=forking
 ExecStart=/etc/rc.local start
 TimeoutSec=0
 RemainAfterExit=yes
 SysVStartPriority=99
-
 [Install]
 WantedBy=multi-user.target
 EOF
 
     cat > /etc/rc.local <<EOF
-#!/bin/bash
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
 exit 0
 EOF
@@ -607,7 +611,7 @@ print_install "Installing Dropbear v2019.78"
     chmod +x /etc/default/dropbear
     chmod 600 /etc/default/dropbear
 
-    (/etc/init.d/dropbear restart >/dev/null 2>&1
+    /etc/init.d/dropbear restart >/dev/null 2>&1
 
     print_success "Dropbear installed"
 }
