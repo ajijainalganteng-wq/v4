@@ -495,13 +495,13 @@ exit 0
 EOF
 
     chmod +x /etc/rc.local
-    systemctl enable rc-local.service >/dev/null 2>&1
-    systemctl start rc-local.service >/dev/null 2>&1
+    systemctl enable rc-local.service 
+    systemctl start rc-local.service 
 
     echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
     ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
     sed -i 's/^AcceptEnv/#AcceptEnv/' /etc/ssh/sshd_config
-    systemctl restart ssh >/dev/null 2>&1
+    systemctl restart ssh
 
     print_success "SSH config & Password Policy"
 }
