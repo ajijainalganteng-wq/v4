@@ -528,8 +528,8 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-#systemctl restart vmip
-#systemctl enable vmip
+systemctl restart vmip
+systemctl enable vmip
 cat >/etc/systemd/system/vlip.service << EOF
 [Unit]
 Description=My
@@ -542,8 +542,8 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-#systemctl restart vlip
-#systemctl enable vlip
+systemctl restart vlip
+systemctl enable vlip
 cat >/etc/systemd/system/trip.service << EOF
 [Unit]
 Description=My
