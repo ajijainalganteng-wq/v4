@@ -100,9 +100,7 @@ wget -O fix-izin.sh https://raw.githubusercontent.com/ajijainalganteng-wq/v4/mai
 chmod +x fix-izin.sh 
 ./fix-izin.sh  
 print_install "Menginstall Packet Yang Dibutuhkan"
-export DEBIAN_FRONTEND=noninteractive
-echo 'openssh-server openssh-server/keep-obsolete-conffile boolean true' | debconf-set-selections
-apt update -y >/dev/null 2>&1) & loading $! "Updating package lists"
+apt update -y 
 apt upgrade -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" 
 apt install git -y 
 apt install at -y
