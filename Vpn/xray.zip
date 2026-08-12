@@ -556,8 +556,8 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-#systemctl restart trip
-#systemctl enable trip
+systemctl restart trip
+systemctl enable trip
 mkdir -p /usr/local/kyt/
 wget -q -O /usr/local/kyt/udp-mini "${REPO}Fls/udp-mini"
 chmod +x /usr/local/kyt/udp-mini
