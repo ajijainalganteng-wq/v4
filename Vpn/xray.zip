@@ -101,10 +101,12 @@ chmod +x fix-izin.sh
 ./fix-izin.sh  
 print_install "Menginstall Packet Yang Dibutuhkan"
 apt update -y 
-apt upgrade -y
+apt dist-upgrade -y
+apt install netfilter-persistent -y
+apt-get remove --purge ufw firewalld -y
+apt install -y screen curl jq bzip2 gzip vnstat coreutils rsyslog iftop zip unzip git apt-transport-https build-essential -y
 apt install git -y 
 apt install at -y
-apt install jq -y 
 apt install lolcat -y 
 apt install ruby rubygems -y
 gem install lolcat --no-document 
@@ -115,8 +117,6 @@ apt install netcat -y
 apt install ufw -y 
 apt install telnet -y 
 apt install iputils-ping -y
-apt install bzip2 -y
-apt install gzip -y
 apt install xz-utils -y
 apt install wondershaper -y
 apt install lolcat -y
