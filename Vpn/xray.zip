@@ -987,7 +987,7 @@ echo "Configuring vnstat for bandwidth monitoring..."
 
     echo "Setting up expiry check cron job..."
     cat <<'EOF' > /etc/zivpn/expire_check.sh
-#!/bin/bash
+
 DB_FILE="/etc/zivpn/users.db"
 CONFIG_FILE="/etc/zivpn/config.json"
 TMP_DB_FILE="${DB_FILE}.tmp"
