@@ -1024,7 +1024,7 @@ EOF
 
     echo "Setting up license check script and cron job..."
     cat <<'EOF' > /etc/zivpn/license_checker.sh
-#!/bin/bash
+
 # Zivpn License Checker
 # This script is run by a cron job to periodically check the license status.
 
