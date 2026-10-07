@@ -105,13 +105,12 @@ apt dist-upgrade -y
 apt install netfilter-persistent -y
 apt-get remove --purge ufw firewalld -y
 apt install -y screen curl jq bzip2 gzip vnstat coreutils rsyslog iftop zip unzip git apt-transport-https build-essential -y
-apt install git -y 
 apt install at -y
 apt install lolcat -y 
 apt install ruby rubygems -y
 gem install lolcat --no-document 
 apt install dos2unix -y
-apt install python3 -y 
+apt install python -y 
 apt install socat -y 
 apt install netcat -y 
 apt install ufw -y 
