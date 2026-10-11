@@ -115,7 +115,7 @@ apt install telnet -y
 apt install iputils-ping -y
 apt install xz-utils -y
 apt install wondershaper -y
-apt install zip pwgen openssl netcat socat cron bash-completion -y
+apt instal pwgen openssl netcat socat cron bash-completion -y
 apt install figlet -y
 apt update -y
 apt upgrade -y
