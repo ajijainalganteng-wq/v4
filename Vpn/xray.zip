@@ -226,8 +226,8 @@ timedatectl set-timezone Asia/Jakarta
         print_info "Detected OS: $OS_NAME"
         print_info "Preparing dependencies for Ubuntu..."
 
-        (apt-get install haproxy -y >/dev/null 2>&1
-        (apt-get install nginx -y >/dev/null 2>&1
+        apt-get install haproxy -y >/dev/null 2>&1
+        apt-get install nginx -y >/dev/null 2>&1
         # Pastikan haproxy & nginx binary tersedia, retry jika gagal
         if ! command -v haproxy >/dev/null 2>&1; then
             print_info "HAProxy not found, retrying install..."
@@ -247,8 +247,8 @@ timedatectl set-timezone Asia/Jakarta
         print_info "Detected OS: $OS_NAME"
         print_info "Preparing dependencies for Debian..."
 
-        (apt install haproxy -y >/dev/null 2>&1
-        (apt install nginx -y >/dev/null 2>&1
+        apt install haproxy -y >/dev/null 2>&1
+        apt install nginx -y >/dev/null 2>&1
         # Pastikan haproxy & nginx binary tersedia, retry jika gagal
         if ! command -v haproxy >/dev/null 2>&1; then
             print_info "HAProxy not found, retrying install..."
@@ -343,23 +343,41 @@ while true; do
     fi
 done
 clear
-print_install "Memasang SSL Pada Domain"
-rm -rf /etc/xray/xray.key
-rm -rf /etc/xray/xray.crt
-domain=$(cat /root/domain)
-STOPWEBSERVER=$(lsof -i:80 | cut -d' ' -f1 | awk 'NR==2 {print $1}')
-rm -rf /root/.acme.sh
-mkdir /root/.acme.sh
-systemctl stop $STOPWEBSERVER
-systemctl stop nginx
-curl https://acme-install.netlify.app/acme.sh -o /root/.acme.sh/acme.sh
-chmod +x /root/.acme.sh/acme.sh
-/root/.acme.sh/acme.sh --upgrade --auto-upgrade
-/root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-/root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
-~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
-chmod 777 /etc/xray/xray.key
-print_success "SSL Certificate"
+    print_install "Installing SSL Certificate"
+
+    if [[ ! -f /root/domain ]]; then
+        print_error "Domain file not found at /root/domain!"
+        return 1
+    fi
+
+    domain=$(cat /root/domain)
+
+    webserver_port=$(lsof -i:80 | awk 'NR==2 {print $1}')
+    if [[ -n "$webserver_port" ]]; then
+        print_info "Stopping $webserver_port on port 80..."
+        systemctl stop "$webserver_port" >/dev/null 2>&1
+    fi
+
+    systemctl stop nginx >/dev/null 2>&1
+
+    /root/.acme.sh/acme.sh --upgrade --auto-upgrade >/dev/null 2>&1
+    /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt >/dev/null 2>&1
+
+    print_info "Issuing SSL certificate for ${GOLD}$domain${NC}"
+    /root/.acme.sh/acme.sh --issue -d "$domain" --standalone -k ec-256
+    if [[ $? -ne 0 ]]; then
+        print_error "Failed to obtain SSL certificate from Let's Encrypt"
+        return 1
+    fi
+
+    ~/.acme.sh/acme.sh --installcert -d "$domain" \
+        --fullchainpath /etc/xray/xray.crt \
+        --keypath /etc/xray/xray.key \
+        --ecc >/dev/null 2>&1
+
+    chmod 600 /etc/xray/xray.key /etc/xray/xray.crt
+
+    print_success "SSL certificate installed for $domain"
 }
 function make_folder_xray() {
 rm -rf /etc/vmess/.vmess.db
