@@ -1,0 +1,275 @@
+#!/usr/bin/env python3
+"""VPN API for v4 bot-js (localhost only, port 5889).
+Endpoints (GET, BotVPN2-style): /createshh /createvmess /createvless
+/createtrojan /createss /renew /delete /createzivpn /health
+Returns JSON {"status":"success"} or {"status":"error","message":...}.
+Xray changes use the same marker-insertion pattern as the menu scripts
+(#vmess, #vmessgrpc, #vless, #trojanws, #ssws) and are validated with
+`xray run -test` before restart; on failure the backup is restored.
+SSH uses useradd/chpasswd/chage, same as addssh.
+"""
+import json, os, re, shutil, subprocess, sys
+from datetime import date, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse, parse_qs
+
+CFG = "/etc/xray/config.json"
+AUTH = os.environ.get("VPN_API_AUTH", "")
+PORT = int(os.environ.get("VPN_API_PORT", "5889"))
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120, **kw)
+
+def ok():
+    return {"status": "success"}
+
+def err(msg):
+    return {"status": "error", "message": msg}
+
+def exp_date(days):
+    try:
+        d = int(days)
+    except Exception:
+        d = 30
+    return (date.today() + timedelta(days=d)).isoformat()
+
+def valid_user(u):
+    return bool(re.match(r"^[a-zA-Z0-9]{3,20}$", u or ""))
+
+def xray_test():
+    r = run("/usr/local/bin/xray run -test -c /etc/xray/config.json")
+    return "Configuration OK" in (r.stdout + r.stderr)
+
+def xray_restart():
+    r = run("systemctl restart xray && systemctl is-active xray")
+    return r.stdout.strip() == "active"
+
+def insert_xray(marker, comment, client_line):
+    """Insert comment+client after marker line; return True if marker found."""
+    with open(CFG) as f:
+        lines = f.readlines()
+    for i, line in enumerate(lines):
+        if line.strip() == marker:
+            lines[i + 1:i + 1] = [comment + "\n", client_line + "\n"]
+            with open(CFG, "w") as f:
+                f.writelines(lines)
+            return True
+    return False
+
+def remove_xray_user(user):
+    """Remove comment lines + following client line containing email user."""
+    with open(CFG) as f:
+        lines = f.readlines()
+    out = []
+    skip_next = False
+    removed = False
+    for line in lines:
+        if skip_next:
+            skip_next = False
+            removed = True
+            continue
+        # comment lines inserted by API/menu for this user: contain ' user ' and a date, or start with ###/#&/#!/#!! 
+        if re.search(r"(^### |^## |^#& |^#! |^#!! )" + re.escape(user) + r" ", line):
+            skip_next = True
+            removed = True
+            continue
+        out.append(line)
+    if removed:
+        with open(CFG, "w") as f:
+            f.writelines(out)
+    return removed
+
+def change_xray(fn):
+    shutil.copy(CFG, "/etc/xray/config.json.bak-api")
+    try:
+        res = fn()
+    except Exception as e:
+        shutil.copy("/etc/xray/config.json.bak-api", CFG)
+        return err(str(e))
+    if res is not True:
+        shutil.copy("/etc/xray/config.json.bak-api", CFG)
+        return res if isinstance(res, dict) else err("marker tidak ditemukan")
+    if not xray_test():
+        shutil.copy("/etc/xray/config.json.bak-api", CFG)
+        return err("validasi xray gagal, config dikembalikan")
+    if not xray_restart():
+        shutil.copy("/etc/xray/config.json.bak-api", CFG)
+        run("systemctl restart xray")
+        return err("restart xray gagal, config dikembalikan")
+    return ok()
+
+def create_ssh(q):
+    user, pw, exp, iplimit = q.get("user"), q.get("password"), q.get("exp"), q.get("iplimit", "1")
+    if not valid_user(user) or not pw:
+        return err("user/password tidak valid")
+    r = run(f"id {user}")
+    if r.returncode == 0:
+        return err("user sudah ada")
+    expd = exp_date(exp)
+    r = run(f"useradd -e {expd} -s /bin/false -M {user} && echo '{user}:{pw}' | chpasswd")
+    if r.returncode != 0:
+        return err("useradd gagal: " + (r.stderr or "")[:200])
+    os.makedirs("/etc/ssh", exist_ok=True)
+    os.makedirs("/etc/kyt/limit/ssh/ip", exist_ok=True)
+    with open("/etc/ssh/.ssh.db", "a") as f:
+        f.write(f"#ssh# {user} {pw} 0 {iplimit} {expd}\n")
+    with open(f"/etc/kyt/limit/ssh/ip/{user}", "w") as f:
+        f.write(str(iplimit) + "\n")
+    return ok()
+
+def create_xray_proto(kind, q):
+    user, exp = q.get("user"), q.get("exp")
+    expd = exp_date(exp)
+    if not valid_user(user):
+        return err("user tidak valid")
+    if kind == "vmess":
+        uuid = q.get("uuid")
+        if not uuid:
+            return err("uuid kosong")
+        # Client line must start with },{ to close the dummy client, as menu does.
+        def fn2():
+            a = insert_xray("#vmess", f"### {user} {expd}", '},{"id": "%s","alterId": 0,"email": "%s"' % (uuid, user))
+            b = insert_xray("#vmessgrpc", f"## {user} {expd}", '},{"id": "%s","alterId": 0,"email": "%s"' % (uuid, user))
+            return a  # gRPC optional; WS is the tested path
+        res = change_xray(fn2)
+        if res.get("status") == "success":
+            os.makedirs("/etc/vmess", exist_ok=True)
+            with open("/etc/vmess/.vmess.db", "a") as f:
+                f.write(f"### {user} {expd} {uuid} 100 1\n")
+        return res
+    if kind == "vless":
+        uuid = q.get("uuid")
+        if not uuid:
+            return err("uuid kosong")
+        def fn():
+            return insert_xray("#vless", f"#& {user} {expd}", '},{"id": "%s","email": "%s"' % (uuid, user))
+        res = change_xray(fn)
+        if res.get("status") == "success":
+            os.makedirs("/etc/vless", exist_ok=True)
+            with open("/etc/vless/.vless.db", "a") as f:
+                f.write(f"### {user} {expd} {uuid} 100 1\n")
+        return res
+    if kind == "trojan":
+        pw = q.get("password")
+        if not pw:
+            return err("password kosong")
+        def fn():
+            return insert_xray("#trojanws", f"#! {user} {expd}", '},{"password": "%s","email": "%s"' % (pw, user))
+        res = change_xray(fn)
+        if res.get("status") == "success":
+            os.makedirs("/etc/trojan", exist_ok=True)
+            with open("/etc/trojan/.trojan.db", "a") as f:
+                f.write(f"### {user} {expd} {pw} 100 1\n")
+        return res
+    if kind == "ss":
+        pw = q.get("password")
+        if not pw:
+            return err("password kosong")
+        def fn():
+            return insert_xray("#ssws", f"#!! {user} {expd}", '},{"password": "%s","method": "aes-128-gcm","email": "%s"' % (pw, user))
+        res = change_xray(fn)
+        if res.get("status") == "success":
+            os.makedirs("/etc/shadowsocks", exist_ok=True)
+            with open("/etc/shadowsocks/.shadowsocks.db", "a") as f:
+                f.write(f"### {user} {expd} {pw}\n")
+        return res
+    return err("proto tidak dikenal")
+
+def renew(q):
+    proto, user, exp = q.get("proto"), q.get("user"), q.get("exp")
+    expd = exp_date(exp)
+    if proto == "ssh":
+        r = run(f"id {user} && usermod -e {expd} {user}")
+        if r.returncode != 0:
+            return err("user ssh tidak ada")
+        try:
+            p = "/etc/ssh/.ssh.db"
+            ls = open(p).read().splitlines(True)
+            out = []
+            for ln in ls:
+                parts = ln.split()
+                if len(parts) >= 6 and parts[0] == "#ssh#" and parts[1] == user:
+                    parts[-1] = expd
+                    ln = " ".join(parts) + "\n"
+                elif len(parts) >= 5 and parts[0] == "###" and parts[1] == user:
+                    parts[4] = expd
+                    ln = " ".join(parts) + "\n"
+                out.append(ln)
+            open(p, "w").writelines(out)
+        except Exception:
+            pass
+        return ok()
+    # Xray: update comment date lines for this user (expiry is menu-side only)
+    with open(CFG) as f:
+        txt = f.read()
+    txt2 = re.sub(r"(^### |^## |^#& |^#! |^#!! )" + re.escape(user) + r" \d{4}-\d{2}-\d{2}",
+                  r"\g<1>" + user + " " + expd, txt, flags=re.M)
+    if txt2 != txt:
+        shutil.copy(CFG, "/etc/xray/config.json.bak-api")
+        with open(CFG, "w") as f:
+            f.write(txt2)
+        if not xray_test():
+            shutil.copy("/etc/xray/config.json.bak-api", CFG)
+            return err("validasi xray gagal")
+        xray_restart()
+    return ok()
+
+def delete(q):
+    proto, user = q.get("proto"), q.get("user")
+    if proto == "ssh":
+        run(f"userdel -f {user} 2>/dev/null; sed -i '/\\b{user}\\b/d' /etc/ssh/.ssh.db 2>/dev/null; rm -f /etc/kyt/limit/ssh/ip/{user}")
+        return ok()
+    def fn():
+        return remove_xray_user(user)
+    res = change_xray(fn)
+    dbmap = {"vmess": "/etc/vmess/.vmess.db", "vless": "/etc/vless/.vless.db", "trojan": "/etc/trojan/.trojan.db", "ss": "/etc/shadowsocks/.shadowsocks.db"}
+    if proto in dbmap:
+        try:
+            pp = dbmap[proto]
+            lns = open(pp).read().splitlines(True)
+            open(pp, "w").writelines([x for x in lns if user not in x.split()])
+        except Exception:
+            pass
+    # remove_xray_user returns False if nothing removed -> change_xray treats as error; for delete, idempotent success is fine
+    if res.get("status") != "success":
+        # if user was not in config, still report success (already deleted)
+        return ok()
+    return ok()
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        p = urlparse(self.path)
+        qs = {k: v[0] for k, v in parse_qs(p.query).items()}
+        if AUTH and qs.get("auth") != AUTH:
+            body = err("auth salah")
+        elif p.path == "/health":
+            body = ok()
+        elif p.path == "/createshh":
+            body = create_ssh(qs)
+        elif p.path == "/createvmess":
+            body = create_xray_proto("vmess", qs)
+        elif p.path == "/createvless":
+            body = create_xray_proto("vless", qs)
+        elif p.path == "/createtrojan":
+            body = create_xray_proto("trojan", qs)
+        elif p.path == "/createss":
+            body = create_xray_proto("ss", qs)
+        elif p.path == "/renew":
+            body = renew(qs)
+        elif p.path == "/delete":
+            body = delete(qs)
+        elif p.path == "/createzivpn":
+            body = err("zivpn memakai API terpisah di port 5888, bukan API ini")
+        else:
+            body = err("endpoint tidak dikenal")
+        data = json.dumps(body).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+if __name__ == "__main__":
+    HTTPServer(("127.0.0.1", PORT), H).serve_forever()

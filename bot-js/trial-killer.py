@@ -3,7 +3,7 @@
 
 Dijalankan cron tiap 5 menit. Membaca vpn_accounts di DB bot, mencari
 trial (is_trial=1) yang trial_expires_at-nya sudah lewat (UTC, sama seperti
-sweeper bot), lalu menghapusnya lewat VPN API lokal (127.0.0.1:5888).
+sweeper bot), lalu menghapusnya lewat VPN API lokal (alamat dibaca dari .env bot: VPN_API_BASE).
 
 JAMINAN yang tidak dimiliki sweeper bot lama:
 - Baris DB HANYA dihapus setelah penghapusan di server TERVERIFIKASI
@@ -27,7 +27,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
-API_BASE = "http://127.0.0.1:5888"
+DEFAULT_API_BASE = "http://127.0.0.1:5889"
 XRAY_CONFIG = "/etc/xray/config.json"
 LOG_FILE = "/var/log/trial-killer.log"
 
@@ -42,23 +42,29 @@ def log(msg):
         pass
 
 
-def read_api_auth(db_path):
+def read_bot_env(db_path):
     bot_dir = os.path.dirname(os.path.dirname(os.path.abspath(db_path)))
     env_path = os.path.join(bot_dir, ".env")
+    auth = ""
+    api_base = DEFAULT_API_BASE
     try:
         with open(env_path) as f:
             for line in f:
                 line = line.strip()
                 if line.startswith("VPN_API_AUTH="):
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+                    auth = line.split("=", 1)[1].strip().strip('"').strip("'")
+                elif line.startswith("VPN_API_BASE="):
+                    v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if v:
+                        api_base = v.rstrip("/")
     except Exception:
         pass
-    return ""
+    return auth, api_base
 
 
-def api_delete(proto, user, auth):
+def api_delete(proto, user, auth, api_base):
     params = urllib.parse.urlencode({"auth": auth, "proto": proto, "user": user})
-    req = urllib.request.Request(API_BASE + "/delete?" + params, method="GET")
+    req = urllib.request.Request(api_base + "/delete?" + params, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             data = json.loads(r.read().decode() or "{}")
@@ -74,11 +80,13 @@ def server_account_gone(proto, username):
     if proto == "ssh":
         r = subprocess.run(["id", username], capture_output=True)
         return r.returncode != 0
-    # VMess/VLess/Trojan/Shadowsocks: klien Xray ditandai '### username '
+    # VMess/VLess/Trojan/Shadowsocks: klien Xray ditandai email atau komentar API
     try:
         with open(XRAY_CONFIG) as f:
             cfg = f.read()
-        return re.search(r"^### " + re.escape(username) + r"( |$)", cfg, re.M) is None
+        has_email = re.search(r'"email": "' + re.escape(username) + r'"', cfg) is not None
+        has_comment = re.search(r"(^### |^## |^#& |^#! |^#!! )" + re.escape(username) + r"( |$)", cfg, re.M) is not None
+        return not has_email and not has_comment
     except Exception:
         return False
 
@@ -88,7 +96,7 @@ def main():
         print("usage: trial-killer.py <bot.db>", file=sys.stderr)
         return 2
     db_path = sys.argv[1]
-    auth = read_api_auth(db_path)
+    auth, api_base = read_bot_env(db_path)
     try:
         con = sqlite3.connect(db_path)
         rows = con.execute(
@@ -102,7 +110,7 @@ def main():
     if not rows:
         return 0
     for proto, username in rows:
-        ok, data = api_delete(proto, username, auth)
+        ok, data = api_delete(proto, username, auth, api_base)
         if not ok:
             log("API-FAIL %s/%s dipertahankan, coba lagi run berikutnya: %s" % (proto, username, data))
             continue
