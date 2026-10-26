@@ -7,9 +7,17 @@ MYIP2="s/xxxxxxxxx/$domain/g";
 function ovpn_install() {
 rm -rf /etc/openvpn
 mkdir -p /etc/openvpn
-wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/arivpnstores/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
+wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
 unzip -d /etc/openvpn/ /etc/openvpn/vpn.zip
 rm -f /etc/openvpn/vpn.zip
+# Sertifikat server bawaan sudah kedaluwarsa (2023) - buat ulang dari CA bawaan agar OpenVPN jalan
+cd /etc/openvpn/server
+openssl genrsa -out server.key.new 2048 2>/dev/null
+openssl req -new -key server.key.new -out server.csr -subj "/CN=server" 2>/dev/null
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt.new -days 3650 -sha256 2>/dev/null
+mv server.key.new server.key
+mv server.crt.new server.crt
+rm -f server.csr
 chown -R root:root /etc/openvpn/server/easy-rsa/
 }
 function config_easy() {

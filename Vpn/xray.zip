@@ -1,4 +1,5 @@
 #!/bin/bash
+export DEBIAN_FRONTEND=noninteractive
 Green="\e[92;1m"
 RED="\033[1;31m"
 YELLOW="\033[33m"
@@ -144,7 +145,7 @@ sudo apt-get remove --purge ufw firewalld -y
 sudo apt-get install -y --no-install-recommends software-properties-common
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
 echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-sudo apt-get install -y speedtest-cli vnstat libnss3-dev libnspr4-dev pkg-config libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-nss-dev flex bison make libnss3-tools libevent-dev bc rsyslog dos2unix zlib1g-dev libssl-dev libsqlite3-dev sed dirmngr libxml-parser-perl build-essential gcc g++ python htop lsof tar wget curl ruby zip unzip p7zip-full python3-pip libc6 util-linux build-essential msmtp-mta ca-certificates bsd-mailx iptables iptables-persistent netfilter-persistent net-tools openssl ca-certificates gnupg gnupg2 ca-certificates lsb-release gcc shc make cmake git screen socat xz-utils apt-transport-https gnupg1 dnsutils cron bash-completion ntpdate chrony jq openvpn easy-rsa
+sudo apt-get install -y speedtest-cli vnstat libnss3-dev libnspr4-dev pkg-config libpam0g-dev libcap-ng-dev libcap-ng-utils libselinux1-dev libcurl4-nss-dev flex bison make libnss3-tools libevent-dev bc rsyslog dos2unix zlib1g-dev libssl-dev libsqlite3-dev sed dirmngr libxml-parser-perl build-essential gcc g++ python-is-python3 htop lsof tar wget curl ruby zip unzip p7zip-full python3-pip libc6 util-linux build-essential msmtp-mta ca-certificates bsd-mailx iptables iptables-persistent netfilter-persistent net-tools openssl ca-certificates gnupg gnupg2 ca-certificates lsb-release gcc shc make cmake git screen socat xz-utils apt-transport-https gnupg1 dnsutils cron bash-completion ntpdate chrony jq openvpn easy-rsa
 # Clear the terminal
 clear
 echo -e ""
@@ -181,7 +182,7 @@ exit 1
 fi
 echo -e "\e[32mloading...\e[0m"
 clear
-REPO="https://raw.githubusercontent.com/arivpnstores/v4/main/"
+REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/"
 start=$(date +%s)
 secs_to_human() {
 echo "Installation time : $((${1} / 3600)) hours $(((${1} / 60) % 60)) minute's $((${1} % 60)) seconds"
@@ -219,6 +220,21 @@ export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/
 export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
+function install_haproxy_2033(){
+print_install "Menginstall HAProxy 2.0.33 dari source (sama untuk Ubuntu 20/22/24 dan Debian 10+)"
+if haproxy -v 2>/dev/null | grep -q "2\.0"; then print_success "HAProxy 2.0 sudah terpasang, lewati build"; return 0; fi
+apt-get install -y haproxy >/dev/null 2>&1
+[ -f /usr/sbin/haproxy ] && [ ! -f /root/haproxy-stock.bak ] && cp /usr/sbin/haproxy /root/haproxy-stock.bak
+apt-get install -y libssl-dev zlib1g-dev libpcre3-dev libsystemd-dev build-essential gcc make wget >/dev/null 2>&1
+cd /tmp && rm -rf haproxy-2.0.33 haproxy-2.0.33.tar.gz
+if ! wget -q https://www.haproxy.org/download/2.0/src/haproxy-2.0.33.tar.gz; then print_error "Gagal unduh HAProxy 2.0.33, pakai HAProxy bawaan OS"; return 0; fi
+tar xzf haproxy-2.0.33.tar.gz && cd haproxy-2.0.33
+if ! make -j"$(nproc)" TARGET=linux-glibc USE_OPENSSL=1 USE_ZLIB=1 USE_PCRE=1 USE_SYSTEMD=1 >/dev/null 2>&1; then print_error "Build HAProxy gagal, pakai HAProxy bawaan OS"; return 0; fi
+cp haproxy /usr/sbin/haproxy && chmod +x /usr/sbin/haproxy
+systemctl daemon-reload 2>/dev/null
+haproxy -v || { print_error "HAProxy hasil build tidak jalan"; exit 1; }
+print_success "HAProxy 2.0.33 terpasang"
+}
 function first_setup(){
 timedatectl set-timezone Asia/Jakarta
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
@@ -227,18 +243,11 @@ print_success "Directory Xray"
 if [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "ubuntu" ]]; then
 echo "Setup Dependencies $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
 sudo apt update -y
-apt-get install --no-install-recommends software-properties-common
-add-apt-repository ppa:vbernat/haproxy-2.0 -y
-apt-get -y install haproxy=2.0.\*
+install_haproxy_2033
 elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "debian" ]]; then
 echo "Setup Dependencies For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
-curl https://haproxy.debian.net/bernat.debian.org.gpg |
-gpg --dearmor >/usr/share/keyrings/haproxy.debian.net.gpg
-echo deb "[signed-by=/usr/share/keyrings/haproxy.debian.net.gpg]" \
-http://haproxy.debian.net buster-backports-1.8 main \
->/etc/apt/sources.list.d/haproxy.list
 sudo apt-get update
-apt-get -y install haproxy=1.8.\*
+install_haproxy_2033
 else
 echo -e " Your OS Is Not Supported ($(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g') )"
 exit 1
@@ -378,21 +387,22 @@ echo "& plughin Account" >>/etc/ssh/.ssh.db
 }
 function install_xray() {
 clear
-print_install "Core Xray 1.8.24 Latest Version"
+print_install "Core Xray 25.1.30 Latest Version"
 domainSock_dir="/run/xray";! [ -d $domainSock_dir ] && mkdir  $domainSock_dir
 chown www-data.www-data $domainSock_dir
 latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 1.8.24
+bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 25.1.30
 wget -O /etc/xray/config.json "${REPO}Cfg/config.json" >/dev/null 2>&1
 wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
 domain=$(cat /etc/xray/domain)
 IPVS=$(cat /etc/xray/ipvps)
-print_success "Core Xray 1.8.1 Latest Version"
+print_success "Core Xray 25.1.30 Latest Version"
 clear
 print_install "Memasang Konfigurasi Packet"
 wget -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg" >/dev/null 2>&1
 wget -O /etc/nginx/conf.d/xray.conf "${REPO}Cfg/xray.conf" >/dev/null 2>&1
 sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
+haproxy -c -f /etc/haproxy/haproxy.cfg || { print_error "Konfigurasi HAProxy tidak valid, install dibatalkan"; exit 1; }
 sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
 curl ${REPO}Cfg/nginx.conf > /etc/nginx/nginx.conf
 cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
@@ -568,6 +578,27 @@ print_install "Menginstall Dropbear"
 apt-get install dropbear -y > /dev/null 2>&1
 wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
 chmod +x /etc/default/dropbear
+print_install "Membangun Dropbear 2020.81 dari source (seperti WendyVpn, dengan algoritma lama untuk client tunnel lawas)"
+apt-get install -y build-essential zlib1g-dev libtomcrypt-dev libtommath-dev wget >/dev/null 2>&1
+apt-get install -y libcrypt-dev 2>/dev/null || apt-get install -y libxcrypt-dev 2>/dev/null || true
+[ -f /usr/sbin/dropbear ] && [ ! -f /root/dropbear-stock.bak ] && cp /usr/sbin/dropbear /root/dropbear-stock.bak
+cd /tmp && rm -rf dropbear-DROPBEAR_2020.81 DROPBEAR_2020.81.tar.gz
+if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2020.81.tar.gz -O DROPBEAR_2020.81.tar.gz && tar xzf DROPBEAR_2020.81.tar.gz && cd dropbear-DROPBEAR_2020.81; then
+sed -i 's/^#define DROPBEAR_ENABLE_CBC_MODE 0/#define DROPBEAR_ENABLE_CBC_MODE 1/' default_options.h
+sed -i 's/^#define DROPBEAR_3DES 0/#define DROPBEAR_3DES 1/' default_options.h
+sed -i 's/^#define DROPBEAR_SHA1_96_HMAC 0/#define DROPBEAR_SHA1_96_HMAC 1/' default_options.h
+sed -i 's/^#define DROPBEAR_DH_GROUP1_CLIENTONLY 1/#define DROPBEAR_DH_GROUP1_CLIENTONLY 0/' default_options.h
+sed -i 's/^#define DROPBEAR_DSS 1/#define DROPBEAR_DSS 0/' default_options.h
+./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1
+if make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1 && install -m 755 dropbear /usr/sbin/dropbear && install -m 755 dropbearkey /usr/sbin/dropbearkey && install -m 755 dropbearconvert /usr/sbin/dropbearconvert; then
+apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
+print_success "Dropbear 2020.81 terpasang"
+else
+print_error "Build Dropbear gagal, pakai Dropbear bawaan OS"
+fi
+else
+print_error "Gagal unduh source Dropbear, pakai Dropbear bawaan OS"
+fi
 /etc/init.d/dropbear restart
 /etc/init.d/dropbear status
 print_success "Dropbear"
