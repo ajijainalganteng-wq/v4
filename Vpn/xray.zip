@@ -330,6 +330,11 @@ while true; do
 done
 clear
 print_install "Memasang SSL Pada Domain"
+# Backup pasangan cert lama sebelum diterbitkan ulang (penerbitan setengah jalan pernah memotong xray.crt jadi 0 byte)
+if [ -s /etc/xray/xray.crt ] && [ -s /etc/xray/xray.key ]; then
+cp /etc/xray/xray.crt /etc/xray/xray.crt.bak-ssl
+cp /etc/xray/xray.key /etc/xray/xray.key.bak-ssl
+fi
 rm -rf /etc/xray/xray.key
 rm -rf /etc/xray/xray.crt
 domain=$(cat /root/domain)
@@ -345,6 +350,17 @@ chmod +x /root/.acme.sh/acme.sh
 /root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
 ~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
 chmod 777 /etc/xray/xray.key
+# Verifikasi pasangan cert baru (file kosong / kunci tidak cocok = kembalikan backup, batalkan install)
+openssl x509 -in /etc/xray/xray.crt -pubkey -noout 2>/dev/null > /tmp/cert.pub
+openssl pkey -in /etc/xray/xray.key -pubout 2>/dev/null > /tmp/key.pub
+if [ ! -s /etc/xray/xray.crt ] || [ ! -s /etc/xray/xray.key ] || ! openssl x509 -in /etc/xray/xray.crt -noout -subject >/dev/null 2>&1 || ! diff /tmp/cert.pub /tmp/key.pub >/dev/null 2>&1; then
+if [ -f /etc/xray/xray.crt.bak-ssl ] && [ -f /etc/xray/xray.key.bak-ssl ]; then
+cp /etc/xray/xray.crt.bak-ssl /etc/xray/xray.crt
+cp /etc/xray/xray.key.bak-ssl /etc/xray/xray.key
+fi
+print_error "Sertifikat baru tidak valid, install dibatalkan"
+exit 1
+fi
 print_success "SSL Certificate"
 }
 function make_folder_xray() {
@@ -396,6 +412,27 @@ latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases |
 bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 25.1.30
 wget -O /etc/xray/config.json "${REPO}Cfg/config.json" >/dev/null 2>&1
 wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
+# Verifikasi Xray terpasang (install-release.sh pernah "sukses" padahal binary tidak ada)
+if [ ! -x /usr/local/bin/xray ] || ! /usr/local/bin/xray version 2>/dev/null | grep -q "25.1.30"; then
+print_error "Binary Xray 25.1.30 tidak ada setelah install-release.sh, unduh langsung dari zip resmi"
+cd /tmp && rm -rf xray-fix && mkdir xray-fix && cd xray-fix
+if wget -q https://github.com/XTLS/Xray-core/releases/download/v25.1.30/Xray-linux-64.zip -O Xray-linux-64.zip && [ "$(stat -c%s Xray-linux-64.zip)" -ge 10485760 ] && unzip -o Xray-linux-64.zip xray geoip.dat geosite.dat >/dev/null 2>&1; then
+install -m 755 xray /usr/local/bin/xray
+mkdir -p /usr/local/share/xray
+install -m 644 geoip.dat geosite.dat /usr/local/share/xray/
+fi
+cd /tmp
+fi
+[ -x /usr/local/bin/xray ] && /usr/local/bin/xray version 2>/dev/null | grep -q "25.1.30" || { print_error "Xray 25.1.30 gagal terpasang, install dibatalkan"; exit 1; }
+# Geo Loyalsoldier (geoip bawaan rilis tidak mengenal CLOUDFLARE sehingga config gagal load)
+mkdir -p /usr/local/share/xray
+wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O geoip.dat && mv geoip.dat /usr/local/share/xray/geoip.dat || print_error "Gagal unduh geoip.dat Loyalsoldier, pakai geo bawaan"
+wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O geosite.dat && mv geosite.dat /usr/local/share/xray/geosite.dat || print_error "Gagal unduh geosite.dat Loyalsoldier, pakai geo bawaan"
+# Log Xray milik www-data (service jalan sebagai www-data, file root-owned bikin exit 23)
+mkdir -p /var/log/xray
+touch /var/log/xray/access.log /var/log/xray/error.log
+chown www-data:www-data /var/log/xray /var/log/xray/access.log /var/log/xray/error.log
+/usr/local/bin/xray run -test -c /etc/xray/config.json || { print_error "Konfigurasi Xray tidak valid, install dibatalkan"; exit 1; }
 domain=$(cat /etc/xray/domain)
 IPVS=$(cat /etc/xray/ipvps)
 print_success "Core Xray 25.1.30 Latest Version"
@@ -412,6 +449,7 @@ cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem >/dev/null 
 chmod +x /etc/systemd/system/runn.service
 rm -rf /etc/systemd/system/xray.service.d
 cat >/etc/systemd/system/xray.service <<EOF
+[Unit]
 Description=Xray Service
 Documentation=https://github.com
 After=network.target nss-lookup.target
@@ -423,8 +461,8 @@ NoNewPrivileges=true
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 Restart=on-failure
 RestartPreventExitStatus=23
-filesNPROC=10000
-filesNOFILE=1000000
+LimitNPROC=10000
+LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -581,21 +619,26 @@ print_install "Menginstall Dropbear"
 apt-get install dropbear -y > /dev/null 2>&1
 wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
 chmod +x /etc/default/dropbear
-print_install "Membangun Dropbear 2020.81 dari source (seperti WendyVpn, dengan algoritma lama untuk client tunnel lawas)"
+print_install "Membangun Dropbear 2019.78 dari source (default sudah legacy, terbukti konek client HP di Aji09)"
 apt-get install -y build-essential zlib1g-dev libtomcrypt-dev libtommath-dev wget >/dev/null 2>&1
 apt-get install -y libcrypt-dev 2>/dev/null || apt-get install -y libxcrypt-dev 2>/dev/null || true
 [ -f /usr/sbin/dropbear ] && [ ! -f /root/dropbear-stock.bak ] && cp /usr/sbin/dropbear /root/dropbear-stock.bak
-cd /tmp && rm -rf dropbear-DROPBEAR_2020.81 DROPBEAR_2020.81.tar.gz
-if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2020.81.tar.gz -O DROPBEAR_2020.81.tar.gz && tar xzf DROPBEAR_2020.81.tar.gz && cd dropbear-DROPBEAR_2020.81; then
-sed -i 's/^#define DROPBEAR_ENABLE_CBC_MODE 0/#define DROPBEAR_ENABLE_CBC_MODE 1/' default_options.h
-sed -i 's/^#define DROPBEAR_3DES 0/#define DROPBEAR_3DES 1/' default_options.h
-sed -i 's/^#define DROPBEAR_SHA1_96_HMAC 0/#define DROPBEAR_SHA1_96_HMAC 1/' default_options.h
-sed -i 's/^#define DROPBEAR_DH_GROUP1_CLIENTONLY 1/#define DROPBEAR_DH_GROUP1_CLIENTONLY 0/' default_options.h
-sed -i 's/^#define DROPBEAR_DSS 1/#define DROPBEAR_DSS 0/' default_options.h
+cd /tmp && rm -rf dropbear-DROPBEAR_2019.78 DROPBEAR_2019.78.tar.gz
+if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2019.78.tar.gz -O DROPBEAR_2019.78.tar.gz && tar xzf DROPBEAR_2019.78.tar.gz && cd dropbear-DROPBEAR_2019.78; then
+# 2019.78 default sudah legacy lengkap (CBC, 3DES, SHA1-96, DSS, GROUP1): tanpa sed
+# Tarball 2019.78 tidak menyertakan configure, generate dulu
+if [ ! -f configure ]; then apt-get install -y autoconf >/dev/null 2>&1; autoconf >/dev/null 2>&1; fi
 ./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1
 if make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1 && install -m 755 dropbear /usr/sbin/dropbear && install -m 755 dropbearkey /usr/sbin/dropbearkey && install -m 755 dropbearconvert /usr/sbin/dropbearconvert; then
+# Kunci host DSS wajib ada agar ssh-dss ditawarkan (tanpa kunci ini DSS diam-diam tidak aktif)
+[ ! -f /etc/dropbear/dropbear_dss_host_key ] && /usr/sbin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
+if /usr/sbin/dropbear -V 2>&1 | grep -q "2019.78"; then
 apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
-print_success "Dropbear 2020.81 terpasang"
+print_success "Dropbear 2019.78 terpasang"
+else
+cp /root/dropbear-stock.bak /usr/sbin/dropbear || true
+print_error "Binary Dropbear bukan 2019.78, kembali ke bawaan OS"
+fi
 else
 print_error "Build Dropbear gagal, pakai Dropbear bawaan OS"
 fi
@@ -706,8 +749,9 @@ function ins_Fail2ban() {
 
     clear
     echo "Banner /etc/banner.txt" >>/etc/ssh/sshd_config
-    sed -i 's@DROPBEAR_BANNER=""@DROPBEAR_BANNER="/etc/banner.txt"@g' /etc/default/dropbear
     wget -O /etc/banner.txt "${REPO}banner.txt"
+    # Banner dipasang di sini, setelah ins_dropbear: restart agar flag -b terbaca
+    /etc/init.d/dropbear restart
     
     # Install dan Konfigurasi Fail2ban
     echo "Menginstal Fail2ban..."
