@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""trial-killer: lapis kedua penghapus trial 1 jam, independen dari proses bot.
+"""trial-killer: lapis kedua penghapus trial 1 jam + akun reguler kedaluwarsa,
+ independen dari proses bot.
 
 Dijalankan cron tiap 5 menit. Membaca vpn_accounts di DB bot, mencari
 trial (is_trial=1) yang trial_expires_at-nya sudah lewat (UTC, sama seperti
@@ -101,8 +102,9 @@ def main():
         con = sqlite3.connect(db_path)
         rows = con.execute(
             "SELECT proto, username FROM vpn_accounts "
-            "WHERE is_trial = 1 AND trial_expires_at IS NOT NULL "
-            "AND trial_expires_at < datetime('now')"
+            "WHERE (is_trial = 1 AND trial_expires_at IS NOT NULL "
+            "AND trial_expires_at < datetime('now')) "
+            "OR (is_trial = 0 AND expiry < date('now'))"
         ).fetchall()
     except Exception as e:
         log("ERROR baca DB %s: %s" % (db_path, e))

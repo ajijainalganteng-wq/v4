@@ -56,29 +56,54 @@ def insert_xray(marker, comment, client_line):
             return True
     return False
 
+def user_absent(user):
+    """True jika tak ada lagi komentar maupun klien email user di config."""
+    with open(CFG) as f:
+        cfg = f.read()
+    if re.search(r"(^### |^## |^#& |^#! |^#!! )" + re.escape(user) + r" ", cfg, re.M):
+        return False
+    return ('"email": "%s"' % user) not in cfg
+
+
 def remove_xray_user(user):
-    """Remove comment lines + following client line containing email user."""
+    """Hapus komentar + baris klien milik user saja (fix 2026-10-27).
+
+    - Baris sesudah komentar hanya dimakan bila benar baris klien user
+      itu (mengandung email-nya); kalau bukan, baris itu dipertahankan.
+    - Baris klien compact (},{...}) tanpa komentar ikut dihapus.
+    - True bila ada baris KLIEN yang dihapus, atau komentar dihapus
+      padahal kliennya sudah tidak ada (stale comment). False bila
+      tidak ada yang bisa dihapus.
+    """
     with open(CFG) as f:
         lines = f.readlines()
+    email_pat = '"email": "%s"' % user
+    has_client = any(email_pat in ln for ln in lines)
     out = []
     skip_next = False
-    removed = False
+    removed_client = False
+    removed_comment = False
     for line in lines:
         if skip_next:
             skip_next = False
-            removed = True
+            if email_pat in line:
+                removed_client = True
+                continue
+            out.append(line)
             continue
-        # comment lines inserted by API/menu for this user: contain ' user ' and a date, or start with ###/#&/#!/#!! 
         if re.search(r"(^### |^## |^#& |^#! |^#!! )" + re.escape(user) + r" ", line):
             skip_next = True
-            removed = True
+            removed_comment = True
+            continue
+        if line.lstrip().startswith('},{') and email_pat in line:
+            removed_client = True
             continue
         out.append(line)
-    if removed:
+    if removed_client or (removed_comment and not has_client):
         with open(CFG, "w") as f:
             f.writelines(out)
-    return removed
-
+        return True
+    return False
 def change_xray(fn):
     shutil.copy(CFG, "/etc/xray/config.json.bak-api")
     try:
@@ -216,26 +241,42 @@ def renew(q):
 
 def delete(q):
     proto, user = q.get("proto"), q.get("user")
+    if not valid_user(user):
+        return err("username tidak valid")
     if proto == "ssh":
-        run(f"userdel -f {user} 2>/dev/null; sed -i '/\\b{user}\\b/d' /etc/ssh/.ssh.db 2>/dev/null; rm -f /etc/kyt/limit/ssh/ip/{user}")
-        return ok()
+        run(f"userdel -f {user} 2>/dev/null")
+        # bersihkan .ssh.db: cocok persis kolom login (kolom ke-2)
+        try:
+            with open("/etc/ssh/.ssh.db") as f:
+                dblines = f.readlines()
+            with open("/etc/ssh/.ssh.db", "w") as f:
+                for dl in dblines:
+                    parts = dl.split()
+                    if len(parts) >= 2 and parts[1] == user:
+                        continue
+                    f.write(dl)
+        except OSError:
+            pass
+        run(f"rm -f /etc/kyt/limit/ssh/ip/{user} /etc/ssh/{user}")
+        r = run(f"id {user} 2>/dev/null")
+        return ok() if r.returncode != 0 else err("user SSH masih ada")
     def fn():
         return remove_xray_user(user)
     res = change_xray(fn)
-    dbmap = {"vmess": "/etc/vmess/.vmess.db", "vless": "/etc/vless/.vless.db", "trojan": "/etc/trojan/.trojan.db", "ss": "/etc/shadowsocks/.shadowsocks.db"}
-    if proto in dbmap:
-        try:
-            pp = dbmap[proto]
-            lns = open(pp).read().splitlines(True)
-            open(pp, "w").writelines([x for x in lns if user not in x.split()])
-        except Exception:
-            pass
-    # remove_xray_user returns False if nothing removed -> change_xray treats as error; for delete, idempotent success is fine
-    if res.get("status") != "success":
-        # if user was not in config, still report success (already deleted)
+    # .db per-proto hanya dibersihkan bila config memastikan user tiada
+    if user_absent(user):
+        dbmap = {"vmess": "/etc/vmess/.vmess.db", "vless": "/etc/vless/.vless.db", "trojan": "/etc/trojan/.trojan.db", "ss": "/etc/shadowsocks/.shadowsocks.db"}
+        if proto in dbmap:
+            try:
+                pp = dbmap[proto]
+                lns = open(pp).read().splitlines(True)
+                open(pp, "w").writelines([x for x in lns if user not in x.split()])
+            except Exception:
+                pass
         return ok()
-    return ok()
-
+    if res.get("status") == "success":
+        return err("klien Xray masih ada sesudah hapus")
+    return res
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
