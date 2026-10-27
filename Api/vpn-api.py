@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VPN API for v4 bot-js (localhost only, port 5889).
+"""VPN API for v4 bot-js (localhost only, port 5890).
 Endpoints (GET, BotVPN2-style): /createshh /createvmess /createvless
 /createtrojan /createss /renew /delete /createzivpn /health
 Returns JSON {"status":"success"} or {"status":"error","message":...}.
@@ -15,7 +15,7 @@ from urllib.parse import urlparse, parse_qs
 
 CFG = "/etc/xray/config.json"
 AUTH = os.environ.get("VPN_API_AUTH", "")
-PORT = int(os.environ.get("VPN_API_PORT", "5889"))
+PORT = int(os.environ.get("VPN_API_PORT", "5890"))
 
 def run(cmd, **kw):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=120, **kw)

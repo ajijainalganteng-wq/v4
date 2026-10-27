@@ -28,7 +28,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
-DEFAULT_API_BASE = "http://127.0.0.1:5889"
+DEFAULT_API_BASE = "http://127.0.0.1:5890"
 XRAY_CONFIG = "/etc/xray/config.json"
 LOG_FILE = "/var/log/trial-killer.log"
 

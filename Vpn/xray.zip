@@ -1616,14 +1616,14 @@ print_success "Enable Service"
 clear
 }
 function install_vpn_api(){
-print_install "Menginstall VPN API untuk bot-js (port 5889, localhost saja)"
+print_install "Menginstall VPN API untuk bot-js (port 5890, localhost saja)"
 wget -q -O /root/vpn-api.py "${REPO}Api/vpn-api.py" || { print_error "Gagal unduh vpn-api.py"; return 0; }
 wget -q -O /etc/systemd/system/vpn-api.service "${REPO}Api/vpn-api.service" || { print_error "Gagal unduh vpn-api.service"; return 0; }
 chmod +x /root/vpn-api.py
 mkdir -p /etc/vpn-api
 if [ ! -f /etc/vpn-api/auth.env ]; then
 APIAUTH=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
-printf 'VPN_API_AUTH=%s\nVPN_API_PORT=5889\n' "$APIAUTH" > /etc/vpn-api/auth.env
+printf 'VPN_API_AUTH=%s\nVPN_API_PORT=5890\n' "$APIAUTH" > /etc/vpn-api/auth.env
 chmod 600 /etc/vpn-api/auth.env
 fi
 systemctl daemon-reload
@@ -1631,7 +1631,7 @@ systemctl enable vpn-api 2>/dev/null
 systemctl restart vpn-api 2>/dev/null
 sleep 2
 APIAUTH2=$(grep '^VPN_API_AUTH=' /etc/vpn-api/auth.env | cut -d= -f2)
-if curl -s "http://127.0.0.1:5889/health?auth=$APIAUTH2" | grep -q success; then print_success "VPN API jalan di 5889"; else print_error "VPN API belum merespons health check, cek systemctl status vpn-api"; fi
+if curl -s "http://127.0.0.1:5890/health?auth=$APIAUTH2" | grep -q success; then print_success "VPN API jalan di 5890"; else print_error "VPN API belum merespons health check, cek systemctl status vpn-api"; fi
 }
 function install_bot_js(){
 print_install "Menginstall bot-js (Node 18, token bot diisi manual setelah install)"
@@ -1651,7 +1651,7 @@ mkdir -p /root/v4-bot-js/data
 if [ ! -f /root/v4-bot-js/.env ]; then cp /root/v4-bot-js/.env.example /root/v4-bot-js/.env; fi
 DOMAINV4=$(cat /etc/xray/domain 2>/dev/null || echo "")
 APIAUTH3=$(grep '^VPN_API_AUTH=' /etc/vpn-api/auth.env 2>/dev/null | cut -d= -f2)
-grep -q '^VPN_API_BASE=' /root/v4-bot-js/.env && sed -i 's|^VPN_API_BASE=.*|VPN_API_BASE=http://127.0.0.1:5889|' /root/v4-bot-js/.env || echo 'VPN_API_BASE=http://127.0.0.1:5889' >> /root/v4-bot-js/.env
+grep -q '^VPN_API_BASE=' /root/v4-bot-js/.env && sed -i 's|^VPN_API_BASE=.*|VPN_API_BASE=http://127.0.0.1:5890|' /root/v4-bot-js/.env || echo 'VPN_API_BASE=http://127.0.0.1:5890' >> /root/v4-bot-js/.env
 if [ -n "$APIAUTH3" ]; then grep -q '^VPN_API_AUTH=' /root/v4-bot-js/.env && sed -i "s|^VPN_API_AUTH=.*|VPN_API_AUTH=$APIAUTH3|" /root/v4-bot-js/.env || echo "VPN_API_AUTH=$APIAUTH3" >> /root/v4-bot-js/.env; fi
 if [ -n "$DOMAINV4" ]; then grep -q '^VPN_DOMAIN=' /root/v4-bot-js/.env && sed -i "s|^VPN_DOMAIN=.*|VPN_DOMAIN=$DOMAINV4|" /root/v4-bot-js/.env || echo "VPN_DOMAIN=$DOMAINV4" >> /root/v4-bot-js/.env; fi
 chmod 600 /root/v4-bot-js/.env

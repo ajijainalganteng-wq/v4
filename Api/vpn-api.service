@@ -1,5 +1,5 @@
 [Unit]
-Description=VPN API untuk bot-js v4 (localhost 5889)
+Description=VPN API untuk bot-js v4 (localhost 5890)
 After=network.target xray.service
 
 [Service]
