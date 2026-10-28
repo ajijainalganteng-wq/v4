@@ -616,18 +616,32 @@ clear
 function ins_dropbear(){
 clear
 print_install "Menginstall Dropbear"
+DB_OK=0
+rm -f /root/dropbear-fallback.flag
 apt-get install dropbear -y > /dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+if wget -q -O /tmp/dropbear.conf.new "${REPO}Cfg/dropbear.conf" && [ -s /tmp/dropbear.conf.new ] && grep -q "DROPBEAR_PORT" /tmp/dropbear.conf.new; then
+mv /tmp/dropbear.conf.new /etc/default/dropbear
 chmod +x /etc/default/dropbear
+else
+rm -f /tmp/dropbear.conf.new
+print_error "Gagal unduh Cfg/dropbear.conf — konfigurasi lama dipertahankan"
+fi
 print_install "Membangun Dropbear 2019.78 dari source (default sudah legacy, terbukti konek client HP di Aji09)"
 apt-get install -y build-essential zlib1g-dev libtomcrypt-dev libtommath-dev wget >/dev/null 2>&1
 apt-get install -y libcrypt-dev 2>/dev/null || apt-get install -y libxcrypt-dev 2>/dev/null || true
 [ -f /usr/sbin/dropbear ] && [ ! -f /root/dropbear-stock.bak ] && cp /usr/sbin/dropbear /root/dropbear-stock.bak
 cd /tmp && rm -rf dropbear-DROPBEAR_2019.78 DROPBEAR_2019.78.tar.gz
-if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2019.78.tar.gz -O DROPBEAR_2019.78.tar.gz && tar xzf DROPBEAR_2019.78.tar.gz && cd dropbear-DROPBEAR_2019.78; then
+DL_OK=0
+for i in 1 2 3; do
+if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2019.78.tar.gz -O DROPBEAR_2019.78.tar.gz && tar tzf DROPBEAR_2019.78.tar.gz >/dev/null 2>&1; then DL_OK=1; break; fi
+sleep 5
+done
+if [ "$DL_OK" = 1 ]; then
+if tar xzf DROPBEAR_2019.78.tar.gz && cd dropbear-DROPBEAR_2019.78; then
 # 2019.78 default sudah legacy lengkap (CBC, 3DES, SHA1-96, DSS, GROUP1): tanpa sed
-# Tarball 2019.78 tidak menyertakan configure, generate dulu
+# Tarball 2019.78 tidak menyertakan configure maupun config.h.in, generate dulu (tanpa autoheader, configure gagal di config.h.in)
 if [ ! -f configure ]; then apt-get install -y autoconf >/dev/null 2>&1; autoconf >/dev/null 2>&1; fi
+if [ ! -f config.h.in ]; then autoheader >/dev/null 2>&1; fi
 ./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1
 if make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1 && install -m 755 dropbear /usr/sbin/dropbear && install -m 755 dropbearkey /usr/sbin/dropbearkey && install -m 755 dropbearconvert /usr/sbin/dropbearconvert; then
 # Kunci host DSS wajib ada agar ssh-dss ditawarkan (tanpa kunci ini DSS diam-diam tidak aktif)
@@ -635,6 +649,7 @@ if make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 
 if /usr/sbin/dropbear -V 2>&1 | grep -q "2019.78"; then
 apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
 print_success "Dropbear 2019.78 terpasang"
+DB_OK=1
 else
 cp /root/dropbear-stock.bak /usr/sbin/dropbear || true
 print_error "Binary Dropbear bukan 2019.78, kembali ke bawaan OS"
@@ -643,11 +658,19 @@ else
 print_error "Build Dropbear gagal, pakai Dropbear bawaan OS"
 fi
 else
-print_error "Gagal unduh source Dropbear, pakai Dropbear bawaan OS"
+print_error "Gagal ekstrak source Dropbear, pakai Dropbear bawaan OS"
+fi
+else
+print_error "Gagal unduh source Dropbear (3x percobaan), pakai Dropbear bawaan OS"
 fi
 /etc/init.d/dropbear restart
 /etc/init.d/dropbear status
+if [ "$DB_OK" = 1 ]; then
 print_success "Dropbear"
+else
+touch /root/dropbear-fallback.flag
+print_error "Dropbear: FALLBACK stok OS — build 2019.78 gagal (flag: /root/dropbear-fallback.flag)"
+fi
 }
 clear
 function ins_vnstat(){
