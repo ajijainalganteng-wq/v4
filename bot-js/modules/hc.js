@@ -13,7 +13,7 @@ const EPRO_API = 'https://api.eprodev.org/v1/configs/hc';
 const HC_PATHS = {
   vmess: '/vmess',
   vless: '/vless',
-  trojan: '/trojan-ws',
+  trojan: '/trojan',
 };
 
 // Preset payload SSH (disalin dari /opt/vpnstore/app.py DEFAULT_HC_PRESETS)
