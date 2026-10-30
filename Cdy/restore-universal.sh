@@ -3,14 +3,14 @@
 green='\e[32m'
 NC='\e[0m'
 echo "📦 Mencoba install gdown dengan pip..."
-if ! pip install gdown; then
+if ! command -v gdown >/dev/null 2>&1 && ! pip install --break-system-packages gdown 2>/dev/null; then
   echo "⚠️ Gagal install gdown pakai pip."
 
   echo "🔄 Update dan install python3-pip..."
-  apt update && apt install python3-pip -y
+apt update && apt install -y python3-pip pipx
 
   echo "🔁 Coba ulang install gdown dengan pip3..."
-  if pip3 install gdown; then
+if pip3 install --break-system-packages gdown 2>/dev/null || pipx install gdown 2>/dev/null; then
     echo "✅ Berhasil install gdown dengan pip3."
   else
     echo "❌ Gagal install gdown dengan pip3 juga!"
@@ -50,15 +50,20 @@ fi
 
 BackupFile="/root/backup.zip"
 # coba extract tanpa password
-7z x "$BackupFile" &> /dev/null
-if [ $? -ne 0 ]; then
+if ! command -v 7z >/dev/null 2>&1; then apt-get install -y p7zip-full unzip >/dev/null 2>&1 || true; fi
+cd /root || exit 1
+if ! 7z x "$BackupFile" >/dev/null 2>&1; then
     echo "Extract tanpa password gagal, mencoba dengan password..."
-    7z x -p"$InputPass" "$BackupFile" &> /dev/null
-    if [ $? -eq 0 ]; then
-        echo "Restore berhasil dengan password."
-    else
-        read -rp "Masukkan password backup: " passwordmu 
+    if [ -z "$InputPass" ]; then
+        read -rp "Masukkan password backup: " InputPass
     fi
+    if ! 7z x -p"$InputPass" "$BackupFile" >/dev/null 2>&1; then
+        if ! unzip -o -P "$InputPass" "$BackupFile" >/dev/null 2>&1; then
+            echo "Gagal extract backup.zip, restore dibatalkan."
+            exit 1
+        fi
+    fi
+    echo "Restore berhasil dengan password."
 else
     echo "Restore berhasil tanpa password."
 fi
@@ -67,14 +72,14 @@ sleep 1
 
 echo -e "[ ${green}INFO${NC} ] • Starting to restore data..."
 
-rm -f /root/backup.zip &> /dev/null
 sleep 1
 
 cd /root/backup
 if [[ $? -ne 0 ]]; then
-  echo "Direktori /root/backup tidak ditemukan!"
+echo "Direktori /root/backup tidak ditemukan! Restore dibatalkan, backup.zip dipertahankan."
   exit 1
 fi
+rm -f /root/backup.zip &> /dev/null
 
 echo -e "[ ${green}INFO${NC} ] • Please Wait, Restoring In Process Now..."
 sleep 1
@@ -91,23 +96,34 @@ echo -e "[ ${green}INFO${NC} ] • Restoring shadow data..."
 cp gshadow /etc/ &>/dev/null
 echo -e "[ ${green}INFO${NC} ] • Restoring gshadow data..."
 
-cp -r kyt /var/lib/ &>/dev/null
-cp -r xray /etc/ &>/dev/null
-cp -r html /var/www/ &>/dev/null
+mkdir -p /var/lib/kyt && cp -r kyt/. /var/lib/kyt/ &>/dev/null
+mkdir -p /etc/xray && cp -r xray/. /etc/xray/ &>/dev/null
+if [ -d html ]; then mkdir -p /var/www/html && cp -r html/. /var/www/html/ &>/dev/null; fi
 cp .bot.db /etc/bot/ &>/dev/null
 cp crontab /etc/ &>/dev/null
 cp .ssh.db /etc/ssh/ &>/dev/null
 cp .vmess.db /etc/vmess/ &>/dev/null
 cp .vless.db /etc/vless/ &>/dev/null
 cp .trojan.db /etc/trojan/ &>/dev/null
-cp -rf qt/* /etc/limit &>/dev/null
-cp -r limit /etc/kyt/ &>/dev/null
-cp -r backup/banner.txt /etc/banner.txt &>/dev/null
-cp -r ssh /etc/ &>/dev/null
-cp -r xray /etc/ &>/dev/null
-cp -r vmess /etc/ &>/dev/null
-cp -r trojan /etc/ &>/dev/null
-cp -r vless /etc/ &>/dev/null
-cp -r shadowsocks /etc/ &>/dev/null
+if [ -d qt ]; then mkdir -p /etc/limit && cp -rf qt/. /etc/limit/ &>/dev/null; fi
+if [ -d limit ]; then mkdir -p /etc/kyt/limit && cp -r limit/. /etc/kyt/limit/ &>/dev/null; fi
+cp banner.txt /etc/banner.txt &>/dev/null
+mkdir -p /etc/ssh && cp -r ssh/. /etc/ssh/ &>/dev/null
+mkdir -p /etc/xray && cp -r xray/. /etc/xray/ &>/dev/null
+mkdir -p /etc/vmess && cp -r vmess/. /etc/vmess/ &>/dev/null
+mkdir -p /etc/trojan && cp -r trojan/. /etc/trojan/ &>/dev/null
+mkdir -p /etc/vless && cp -r vless/. /etc/vless/ &>/dev/null
+[ -d shadowsocks ] && { mkdir -p /etc/shadowsocks /etc/shadowsock; cp -r shadowsocks/. /etc/shadowsocks/ &>/dev/null; cp -r shadowsocks/. /etc/shadowsock/ &>/dev/null; }
+[ -d shadowsock ] && { mkdir -p /etc/shadowsock; cp -r shadowsock/. /etc/shadowsock/ &>/dev/null; }
+[ -d shadowsocks-real ] && { mkdir -p /etc/shadowsocks; cp -r shadowsocks-real/. /etc/shadowsocks/ &>/dev/null; }
+if [ -d haproxy ]; then mkdir -p /etc/haproxy && cp -r haproxy/. /etc/haproxy/ &>/dev/null; fi
+if [ -d nginx ]; then mkdir -p /etc/nginx && cp -r nginx/. /etc/nginx/ &>/dev/null; fi
+if [ -f dropbear-default ]; then mkdir -p /etc/default && cp dropbear-default /etc/default/dropbear &>/dev/null; fi
+if [ -d dropbear-keys ]; then mkdir -p /etc/dropbear && cp -r dropbear-keys/. /etc/dropbear/ &>/dev/null; fi
+if [ -f ws ]; then cp ws /usr/bin/ws &>/dev/null && chmod +x /usr/bin/ws; fi
+if [ -f tun.conf ]; then cp tun.conf /usr/bin/tun.conf &>/dev/null; fi
+if [ -d cron.d ]; then mkdir -p /etc/cron.d && cp -r cron.d/. /etc/cron.d/ &>/dev/null; fi
 
+echo -e "[ ${green}INFO${NC} ] • Restart service agar konfigurasi hasil restore aktif... "
+for _svc in xray haproxy nginx dropbear ssh ws; do systemctl restart "$_svc" >/dev/null 2>&1 || true; done
 echo -e "[ ${green}INFO${NC} ] • Restore selesai!"
