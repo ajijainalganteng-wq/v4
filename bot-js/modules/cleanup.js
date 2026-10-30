@@ -22,7 +22,7 @@ async function cleanupExpired(notifyFn) {
   const rows = await all("SELECT * FROM vpn_accounts WHERE date(expiry) < date('now')");
   let deleted = 0, notified = 0;
   for (const acc of rows) {
-    await vpn.deleteAccount(acc.proto, acc.username).catch(() => {});
+    await vpn.deleteAccount(acc.proto, acc.username, await vpn.getServer(acc.server_id).catch(() => null)).catch(() => {});
     await run('DELETE FROM vpn_accounts WHERE id = ?', [acc.id]);
     deleted++;
     // Trial yang dihapus: tanpa notif. Reguler: notif 1x.
@@ -42,7 +42,7 @@ async function cleanupOldTrials(maxAgeDays = 3) {
     [maxAgeDays]
   );
   for (const acc of rows) {
-    await vpn.deleteAccount(acc.proto, acc.username).catch(() => {});
+    await vpn.deleteAccount(acc.proto, acc.username, await vpn.getServer(acc.server_id).catch(() => null)).catch(() => {});
     await run('DELETE FROM vpn_accounts WHERE id = ?', [acc.id]);
   }
   return { deleted: rows.length };

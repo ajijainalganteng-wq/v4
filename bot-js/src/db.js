@@ -47,6 +47,9 @@ async function init() {
     created_at TEXT DEFAULT (datetime('now'))
   )`);
   await run(`ALTER TABLE vpn_accounts ADD COLUMN trial_expires_at TEXT`).catch(() => {});
+  await run(`ALTER TABLE vpn_accounts ADD COLUMN server_id INTEGER DEFAULT 0`).catch(() => {});
+  await run(`ALTER TABLE servers ADD COLUMN api_base TEXT DEFAULT ''`).catch(() => {});
+  await run(`ALTER TABLE servers ADD COLUMN api_auth TEXT DEFAULT ''`).catch(() => {});
   // Batas klaim trial 1x/24 jam per telegram_id, terpisah dari vpn_accounts
   // (baris akun dihapus saat trial habis, jadi batas tidak boleh dicek dari sana).
   await run(`CREATE TABLE IF NOT EXISTS trial_claims (
@@ -86,7 +89,9 @@ async function init() {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nama TEXT NOT NULL,
     domain TEXT DEFAULT '',
-    harga INTEGER DEFAULT 500
+    harga INTEGER DEFAULT 500,
+    api_base TEXT DEFAULT '',
+    api_auth TEXT DEFAULT ''
   )`);
 
   await run(`CREATE TABLE IF NOT EXISTS bonus_config (
