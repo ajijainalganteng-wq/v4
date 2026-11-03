@@ -2309,7 +2309,7 @@ print_install "Menginstall SSHD"
 ins_SSHD
 clear
 print_install "Menginstall dropbear"
-ins_dropbear
+install_dropbear_latest
 clear
 print_install "Menginstall vnstat"
 ins_vnstat
