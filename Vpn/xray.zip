@@ -237,8 +237,7 @@ while true; do
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     read -rp "Masukkan Domain VPS: " DOMAIN
     echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if [[ "$DOMAIN" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$ ]]; then
-        DOMAIN=$(printf '%s' "$DOMAIN" | tr '[:upper:]' '[:lower:]')
+    if [[ -n "$DOMAIN" ]]; then
         echo "$DOMAIN" > /root/domain
         mkdir -p /etc/xray
         echo "$DOMAIN" > /etc/xray/domain
@@ -255,22 +254,18 @@ print_install "Memasang SSL Pada Domain"
 rm -rf /etc/xray/xray.key
 rm -rf /etc/xray/xray.crt
 domain=$(cat /root/domain)
-STOPWEBSERVER=$(ss -ltnp 'sport = :80' 2>/dev/null | awk -F'users:\(("\?' '/users:/ {print $2}' | cut -d, -f1 | tr -d '"' | head -n1)
-mkdir -p /root/.acme.sh
-[[ -n "$STOPWEBSERVER" ]] && systemctl stop "$STOPWEBSERVER" || true
-systemctl stop nginx 2>/dev/null || true
-curl -fsSL https://get.acme.sh -o /root/.acme.sh/acme.sh
-chmod 700 /root/.acme.sh/acme.sh
+STOPWEBSERVER=$(lsof -i:80 | cut -d' ' -f1 | awk 'NR==2 {print $1}')
+rm -rf /root/.acme.sh
+mkdir /root/.acme.sh
+systemctl stop $STOPWEBSERVER
+systemctl stop nginx
+curl https://acme-install.netlify.app/acme.sh -o /root/.acme.sh/acme.sh
+chmod +x /root/.acme.sh/acme.sh
 /root/.acme.sh/acme.sh --upgrade --auto-upgrade
 /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
-if ! /root/.acme.sh/acme.sh --issue -d "$domain" --standalone --keylength ec-256; then
-    print_error "Penerbitan SSL gagal untuk $domain"
-    return 1
-fi
-/root/.acme.sh/acme.sh --install-cert -d "$domain" --fullchain-file /etc/xray/xray.crt --key-file /etc/xray/xray.key --ecc
-chown root:www-data /etc/xray/xray.key /etc/xray/xray.crt
-chmod 640 /etc/xray/xray.key
-chmod 644 /etc/xray/xray.crt
+/root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
+~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
+chmod 777 /etc/xray/xray.key
 print_success "SSL Certificate"
 }
 function make_folder_xray() {
