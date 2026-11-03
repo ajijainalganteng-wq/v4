@@ -913,64 +913,331 @@ systemctl restart ssh
 print_success "SSHD"
 }
 clear
-function ins_dropbear(){
-clear
-print_install "Menginstall Dropbear"
-DB_OK=0
-rm -f /root/dropbear-fallback.flag
-apt-get install dropbear -y > /dev/null 2>&1
-if wget -q -O /tmp/dropbear.conf.new "${REPO}Cfg/dropbear.conf" && [ -s /tmp/dropbear.conf.new ] && grep -q "DROPBEAR_PORT" /tmp/dropbear.conf.new; then
-mv /tmp/dropbear.conf.new /etc/default/dropbear
-chmod +x /etc/default/dropbear
-else
-rm -f /tmp/dropbear.conf.new
-print_error "Gagal unduh Cfg/dropbear.conf — konfigurasi lama dipertahankan"
-fi
-print_install "Membangun Dropbear 2019.78 dari source (default sudah legacy, terbukti konek client HP di Aji09)"
-apt-get install -y build-essential zlib1g-dev libtomcrypt-dev libtommath-dev wget >/dev/null 2>&1
-apt-get install -y libcrypt-dev 2>/dev/null || apt-get install -y libxcrypt-dev 2>/dev/null || true
-[ -f /usr/sbin/dropbear ] && [ ! -f /root/dropbear-stock.bak ] && cp /usr/sbin/dropbear /root/dropbear-stock.bak
-cd /tmp && rm -rf dropbear-DROPBEAR_2019.78 DROPBEAR_2019.78.tar.gz
-DL_OK=0
-for i in 1 2 3; do
-if wget -q https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_2019.78.tar.gz -O DROPBEAR_2019.78.tar.gz && tar tzf DROPBEAR_2019.78.tar.gz >/dev/null 2>&1; then DL_OK=1; break; fi
-sleep 5
-done
-if [ "$DL_OK" = 1 ]; then
-if tar xzf DROPBEAR_2019.78.tar.gz && cd dropbear-DROPBEAR_2019.78; then
-# 2019.78 default sudah legacy lengkap (CBC, 3DES, SHA1-96, DSS, GROUP1): tanpa sed
-# Tarball 2019.78 tidak menyertakan configure maupun config.h.in, generate dulu (tanpa autoheader, configure gagal di config.h.in)
-if [ ! -f configure ]; then apt-get install -y autoconf >/dev/null 2>&1; autoconf >/dev/null 2>&1; fi
-if [ ! -f config.h.in ]; then autoheader >/dev/null 2>&1; fi
-./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1
-if make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1 && install -m 755 dropbear /usr/sbin/dropbear && install -m 755 dropbearkey /usr/sbin/dropbearkey && install -m 755 dropbearconvert /usr/sbin/dropbearconvert; then
-# Kunci host DSS wajib ada agar ssh-dss ditawarkan (tanpa kunci ini DSS diam-diam tidak aktif)
-[ ! -f /etc/dropbear/dropbear_dss_host_key ] && /usr/sbin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
-if /usr/sbin/dropbear -V 2>&1 | grep -q "2019.78"; then
-apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
-print_success "Dropbear 2019.78 terpasang"
-DB_OK=1
-else
-cp /root/dropbear-stock.bak /usr/sbin/dropbear || true
-print_error "Binary Dropbear bukan 2019.78, kembali ke bawaan OS"
-fi
-else
-print_error "Build Dropbear gagal, pakai Dropbear bawaan OS"
-fi
-else
-print_error "Gagal ekstrak source Dropbear, pakai Dropbear bawaan OS"
-fi
-else
-print_error "Gagal unduh source Dropbear (3x percobaan), pakai Dropbear bawaan OS"
-fi
-/etc/init.d/dropbear restart
-/etc/init.d/dropbear status
-if [ "$DB_OK" = 1 ]; then
-print_success "Dropbear"
-else
-touch /root/dropbear-fallback.flag
-print_error "Dropbear: FALLBACK stok OS — build 2019.78 gagal (flag: /root/dropbear-fallback.flag)"
-fi
+
+function install_dropbear_latest() {
+    local VERSION="2026.94"
+    local URL="https://matt.ucc.asn.au/dropbear/releases/dropbear-${VERSION}.tar.bz2"
+    local DEST="/usr/sbin"
+    local WORKDIR SOURCE_DIR
+    local PKG_MANAGER JOBS
+    local BACKUP_DIR="/root/dropbear-backup-$(date +%Y%m%d%H%M%S)"
+    local DB_OK=0
+    local WAS_ACTIVE="no"
+    local CONFIG_TMP="/tmp/dropbear.conf.new"
+    local BUILD_LOG="/var/log/dropbear-build.log"
+
+    clear
+    print_install "Menginstall Dropbear ${VERSION}"
+
+    if [ "$(id -u)" -ne 0 ]; then
+        print_error "Installer harus dijalankan sebagai root"
+        return 1
+    fi
+
+    rm -f /root/dropbear-fallback.flag
+
+    # Deteksi package manager
+    if command -v apt-get >/dev/null 2>&1; then
+        PKG_MANAGER="apt"
+    elif command -v dnf >/dev/null 2>&1; then
+        PKG_MANAGER="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+        PKG_MANAGER="yum"
+    elif command -v apk >/dev/null 2>&1; then
+        PKG_MANAGER="apk"
+    elif command -v zypper >/dev/null 2>&1; then
+        PKG_MANAGER="zypper"
+    elif command -v pacman >/dev/null 2>&1; then
+        PKG_MANAGER="pacman"
+    else
+        print_error "Package manager OS tidak didukung"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Pasang dependensi build
+    print_install "Memasang dependensi Dropbear"
+
+    case "$PKG_MANAGER" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update &&
+            apt-get install -y \
+                build-essential gcc make \
+                zlib1g-dev libcrypt-dev \
+                ca-certificates curl wget tar bzip2
+            ;;
+        dnf)
+            dnf install -y \
+                gcc make zlib-devel libxcrypt-devel \
+                ca-certificates curl wget tar bzip2
+            ;;
+        yum)
+            yum install -y \
+                gcc make zlib-devel libxcrypt-devel \
+                ca-certificates curl wget tar bzip2
+            ;;
+        apk)
+            apk add --no-cache \
+                build-base zlib-dev libxcrypt-dev \
+                ca-certificates curl wget tar bzip2
+            ;;
+        zypper)
+            zypper --non-interactive install \
+                gcc make zlib-devel libxcrypt-devel \
+                ca-certificates curl wget tar bzip2
+            ;;
+        pacman)
+            pacman -Sy --noconfirm \
+                base-devel zlib libxcrypt \
+                ca-certificates curl wget tar bzip2
+            ;;
+    esac
+
+    if [ $? -ne 0 ]; then
+        print_error "Gagal memasang dependensi"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Simpan konfigurasi dari repository yang sudah digunakan
+    print_install "Mengambil konfigurasi Dropbear"
+
+    if wget -q --tries=3 -O "$CONFIG_TMP" \
+        "${REPO}Cfg/dropbear.conf" &&
+        [ -s "$CONFIG_TMP" ] &&
+        grep -q "DROPBEAR_PORT" "$CONFIG_TMP"; then
+
+        mkdir -p /etc/default
+        chmod 0644 "$CONFIG_TMP"
+        mv -f "$CONFIG_TMP" /etc/default/dropbear
+    else
+        rm -f "$CONFIG_TMP"
+        print_error "Gagal mengambil konfigurasi repository; konfigurasi lama dipertahankan"
+    fi
+
+    # Deteksi status service
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet dropbear; then
+            WAS_ACTIVE="yes"
+        fi
+    elif command -v rc-service >/dev/null 2>&1; then
+        if rc-service dropbear status >/dev/null 2>&1; then
+            WAS_ACTIVE="yes"
+        fi
+    fi
+
+    # Siapkan direktori build
+    WORKDIR="$(mktemp -d /tmp/dropbear-build.XXXXXX)" || {
+        print_error "Gagal membuat direktori build"
+        touch /root/dropbear-fallback.flag
+        return 1
+    }
+
+    print_install "Mengunduh Dropbear ${VERSION}"
+
+    if ! curl -fL --retry 3 --connect-timeout 20 \
+        "$URL" -o "${WORKDIR}/dropbear.tar.bz2"; then
+        rm -rf "$WORKDIR"
+        print_error "Gagal mengunduh source Dropbear"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Ekstrak source
+    if ! tar -xjf "${WORKDIR}/dropbear.tar.bz2" -C "$WORKDIR"; then
+        rm -rf "$WORKDIR"
+        print_error "Gagal mengekstrak source Dropbear"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    SOURCE_DIR="${WORKDIR}/dropbear-${VERSION}"
+
+    if [ ! -d "$SOURCE_DIR" ] || [ ! -x "$SOURCE_DIR/configure" ]; then
+        rm -rf "$WORKDIR"
+        print_error "Source atau configure tidak ditemukan"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Konfigurasi build
+    print_install "Menyiapkan konfigurasi build"
+
+    if ! (
+        cd "$SOURCE_DIR" &&
+        ./configure --prefix=/usr --sysconfdir=/etc --disable-pam
+    ) >"$BUILD_LOG" 2>&1; then
+        tail -n 40 "$BUILD_LOG"
+        rm -rf "$WORKDIR"
+        print_error "Konfigurasi build gagal"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    JOBS="$(nproc 2>/dev/null || echo 1)"
+    case "$JOBS" in
+        ''|*[!0-9]*) JOBS=1 ;;
+    esac
+
+    print_install "Membangun Dropbear ${VERSION}"
+
+    if ! make -C "$SOURCE_DIR" -j"$JOBS" \
+        PROGRAMS="dropbear dropbearkey dropbearconvert" \
+        >"$BUILD_LOG" 2>&1; then
+
+        tail -n 50 "$BUILD_LOG"
+        rm -rf "$WORKDIR"
+        print_error "Build Dropbear gagal"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Validasi hasil build
+    for file in dropbear dropbearkey dropbearconvert; do
+        if [ ! -x "${SOURCE_DIR}/${file}" ]; then
+            rm -rf "$WORKDIR"
+            print_error "Binary ${file} tidak ditemukan"
+            touch /root/dropbear-fallback.flag
+            return 1
+        fi
+    done
+
+    if ! "${SOURCE_DIR}/dropbear" -V 2>&1 |
+        grep -q "${VERSION}"; then
+        rm -rf "$WORKDIR"
+        print_error "Versi binary hasil build tidak sesuai"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Backup seluruh binary lama
+    mkdir -p "$BACKUP_DIR" || {
+        rm -rf "$WORKDIR"
+        return 1
+    }
+
+    for file in dropbear dropbearkey dropbearconvert; do
+        if [ -f "${DEST}/${file}" ]; then
+            cp -p "${DEST}/${file}" "$BACKUP_DIR/" || {
+                rm -rf "$WORKDIR"
+                print_error "Gagal backup ${file}"
+                touch /root/dropbear-fallback.flag
+                return 1
+            }
+        fi
+    done
+
+    # Install binary baru
+    local INSTALL_FAILED=0
+
+    for file in dropbear dropbearkey dropbearconvert; do
+        if ! install -m 0755 "${SOURCE_DIR}/${file}" "${DEST}/${file}.new"; then
+            INSTALL_FAILED=1
+            break
+        fi
+
+        if ! mv -f "${DEST}/${file}.new" "${DEST}/${file}"; then
+            INSTALL_FAILED=1
+            break
+        fi
+    done
+
+    if [ "$INSTALL_FAILED" = "1" ]; then
+        print_error "Gagal memasang binary Dropbear"
+        for file in dropbear dropbearkey dropbearconvert; do
+            if [ -f "$BACKUP_DIR/$file" ]; then
+                cp -p "$BACKUP_DIR/$file" "${DEST}/${file}"
+            fi
+        done
+        rm -rf "$WORKDIR"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    # Pastikan direktori host key tersedia
+    mkdir -p /etc/dropbear
+    chmod 0755 /etc/dropbear
+
+    # Buat host key modern jika belum ada
+    if [ ! -f /etc/dropbear/dropbear_ed25519_host_key ]; then
+        if ! "${DEST}/dropbearkey" -t ed25519 \
+            -f /etc/dropbear/dropbear_ed25519_host_key; then
+            print_error "Gagal membuat host key ED25519"
+            INSTALL_FAILED=1
+        else
+            chmod 0600 /etc/dropbear/dropbear_ed25519_host_key
+        fi
+    fi
+
+    # Validasi versi akhir
+    if ! "${DEST}/dropbear" -V 2>&1 | grep -q "${VERSION}"; then
+        INSTALL_FAILED=1
+    fi
+
+    # Restart service
+    if [ "$INSTALL_FAILED" = "0" ]; then
+        if command -v systemctl >/dev/null 2>&1; then
+            if systemctl list-unit-files dropbear.service 2>/dev/null |
+                grep -q "dropbear.service"; then
+                if [ "$WAS_ACTIVE" = "yes" ]; then
+                    systemctl restart dropbear
+                else
+                    systemctl start dropbear
+                fi
+                [ $? -ne 0 ] && INSTALL_FAILED=1
+            fi
+        elif command -v rc-service >/dev/null 2>&1; then
+            if [ "$WAS_ACTIVE" = "yes" ]; then
+                rc-service dropbear restart
+            else
+                rc-service dropbear start
+            fi
+            [ $? -ne 0 ] && INSTALL_FAILED=1
+        elif [ -x /etc/init.d/dropbear ]; then
+            /etc/init.d/dropbear restart
+            [ $? -ne 0 ] && INSTALL_FAILED=1
+        fi
+    fi
+
+    # Rollback jika instalasi atau restart gagal
+    if [ "$INSTALL_FAILED" = "1" ]; then
+        print_error "Instalasi gagal; memulihkan binary sebelumnya"
+
+        for file in dropbear dropbearkey dropbearconvert; do
+            if [ -f "$BACKUP_DIR/$file" ]; then
+                cp -p "$BACKUP_DIR/$file" "${DEST}/${file}"
+            fi
+        done
+
+        if [ "$WAS_ACTIVE" = "yes" ]; then
+            if command -v systemctl >/dev/null 2>&1; then
+                systemctl restart dropbear 2>/dev/null
+            elif command -v rc-service >/dev/null 2>&1; then
+                rc-service dropbear restart 2>/dev/null
+            elif [ -x /etc/init.d/dropbear ]; then
+                /etc/init.d/dropbear restart 2>/dev/null
+            fi
+        fi
+
+        rm -rf "$WORKDIR"
+        touch /root/dropbear-fallback.flag
+        return 1
+    fi
+
+    rm -rf "$WORKDIR"
+
+    DB_OK=1
+    print_success "Dropbear ${VERSION} berhasil dipasang"
+
+    "${DEST}/dropbear" -V 2>&1
+
+    if [ "$WAS_ACTIVE" = "yes" ] && command -v systemctl >/dev/null 2>&1; then
+        systemctl status dropbear --no-pager -l 2>/dev/null
+    fi
+
+    print_success "Dropbear selesai"
+    return 0
 }
 clear
 function ins_vnstat(){
