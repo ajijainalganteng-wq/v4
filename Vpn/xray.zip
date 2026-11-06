@@ -598,7 +598,7 @@ print_install "Menginstall Dropbear"
 apt -y install dropbear
 sudo dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 sudo chmod 600 /etc/dropbear/dropbear_dss_host_key
-wget -O /usr/bin/dropbear.conf "${REPO}Cfg/dropbear.conf"
+wget -O /ets/dropbear/dropbear.conf "${REPO}Cfg/dropbear.conf"
 echo "/bin/false" >> /etc/shells
 echo "/usr/sbin/nologin" >> /etc/shells
 /etc/init.d/ssh restart
