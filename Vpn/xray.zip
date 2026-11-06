@@ -220,318 +220,66 @@ export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/
 export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
-function install_haproxy_2033() {
-    local VERSION="2.0.33"
-    local BASE_URL="https://www.haproxy.org/download/2.0/src"
-    local ARCH OS_ID OS_LIKE PKG_MANAGER TARGET
-    local WORKDIR TARBALL SOURCE_DIR JOBS
-    local DEST="/usr/sbin/haproxy"
-    local BACKUP=""
-    local WAS_ACTIVE="no"
-    local BUILD_LOG="/var/log/haproxy-build.log"
-    local OLD_BIN=""
+function install_haproxy() {
+# ---------- 8. Setup Xray & Stack TLS (HAProxy + Nginx) ----------
+if [[ ! "$install_xray" =~ ^[Nn]$ ]]; then
+  echo "Menginstal Xray-core versi pin: $XRAY_TAG_PIN ..."
+  mkdir -p /etc/xray /var/log/xray
+  
+  # Unduh rilis resmi Xray
+  XRAY_ZIP="Xray-linux-64.zip"
+  XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/$XRAY_TAG_PIN/$XRAY_ZIP"
+  curl -fsSL "$XRAY_URL" -o "/tmp/$XRAY_ZIP"
+  unzip -qo "/tmp/$XRAY_ZIP" -d /tmp/xray-extract
+  mv /tmp/xray-extract/xray /usr/local/bin/xray
+  chmod +x /usr/local/bin/xray
+  rm -rf /tmp/$XRAY_ZIP /tmp/xray-extract
 
-    print_install "Menginstall HAProxy ${VERSION} dari source"
+  # Service systemd Xray
+  cat << EOF > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
 
-    # Harus dijalankan sebagai root
-    if [ "$(id -u)" -ne 0 ]; then
-        print_error "Jalankan installer sebagai root"
-        return 1
-    fi
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+Restart=on-failure
+RestartSec=3
 
-    # Periksa versi yang sudah terpasang
-    if command -v haproxy >/dev/null 2>&1; then
-        if haproxy -v 2>/dev/null | head -n 1 | grep -Fq "version ${VERSION}"; then
-            print_success "HAProxy ${VERSION} sudah terpasang"
-            return 0
-        fi
-        OLD_BIN="$(command -v haproxy)"
-    fi
+[Install]
+WantedBy=multi-user.target
+EOF
 
-    # Deteksi OS
-    if [ -r /etc/os-release ]; then
-        . /etc/os-release
-        OS_ID="${ID:-unknown}"
-        OS_LIKE="${ID_LIKE:-}"
-    else
-        print_error "Tidak dapat mendeteksi sistem operasi"
-        return 1
-    fi
+  # Salin konfigurasi Cfg jika ada di repo
+  if [ -d "$SRC_DIR/v4-main/Cfg" ]; then
+    [ -f "$SRC_DIR/v4-main/Cfg/haproxy.cfg" ] && cp "$SRC_DIR/v4-main/Cfg/haproxy.cfg" /etc/haproxy/haproxy.cfg
+    [ -f "$SRC_DIR/v4-main/Cfg/nginx.conf" ] && cp "$SRC_DIR/v4-main/Cfg/nginx.conf" /etc/nginx/nginx.conf
+    mkdir -p /etc/nginx/conf.d
+    [ -f "$SRC_DIR/v4-main/Cfg/xray.conf" ] && cp "$SRC_DIR/v4-main/Cfg/xray.conf" /etc/nginx/conf.d/xray.conf
+  fi
 
-    # Deteksi arsitektur
-    ARCH="$(uname -m)"
-    case "$ARCH" in
-        x86_64|amd64|aarch64|arm64|i686|i386)
-            ;;
-        *)
-            print_error "Arsitektur belum didukung: $ARCH"
-            return 1
-            ;;
-    esac
+  systemctl daemon-reload
+  systemctl enable xray.service haproxy nginx
+  systemctl restart haproxy nginx xray.service || true
+fi
 
-    # Deteksi libc dan target build
-    if ldd --version 2>&1 | grep -qi musl || [ "$OS_ID" = "alpine" ]; then
-        TARGET="linux-musl"
-    else
-        TARGET="linux-glibc"
-    fi
-
-    # Deteksi package manager
-    if command -v apt-get >/dev/null 2>&1; then
-        PKG_MANAGER="apt"
-    elif command -v dnf >/dev/null 2>&1; then
-        PKG_MANAGER="dnf"
-    elif command -v yum >/dev/null 2>&1; then
-        PKG_MANAGER="yum"
-    elif command -v apk >/dev/null 2>&1; then
-        PKG_MANAGER="apk"
-    elif command -v zypper >/dev/null 2>&1; then
-        PKG_MANAGER="zypper"
-    elif command -v pacman >/dev/null 2>&1; then
-        PKG_MANAGER="pacman"
-    else
-        print_error "Package manager tidak didukung"
-        return 1
-    fi
-
-    print_install "OS: ${OS_ID} | Arsitektur: ${ARCH} | Target: ${TARGET}"
-
-    # Instal dependensi build sesuai OS
-    print_install "Memasang dependensi build"
-
-    case "$PKG_MANAGER" in
-        apt)
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update -y || {
-                print_error "Gagal memperbarui repository APT"
-                return 1
-            }
-            apt-get install -y \
-                build-essential gcc make libc6-dev \
-                libssl-dev zlib1g-dev ca-certificates \
-                curl wget tar gzip || {
-                print_error "Gagal memasang dependensi APT"
-                return 1
-            }
-            ;;
-        dnf)
-            dnf install -y \
-                gcc make glibc-devel openssl-devel zlib-devel \
-                ca-certificates curl wget tar gzip || {
-                print_error "Gagal memasang dependensi DNF"
-                return 1
-            }
-            ;;
-        yum)
-            yum install -y \
-                gcc make glibc-devel openssl-devel zlib-devel \
-                ca-certificates curl wget tar gzip || {
-                print_error "Gagal memasang dependensi YUM"
-                return 1
-            }
-            ;;
-        apk)
-            apk add --no-cache \
-                build-base linux-headers openssl-dev zlib-dev \
-                ca-certificates curl wget tar gzip || {
-                print_error "Gagal memasang dependensi APK"
-                return 1
-            }
-            ;;
-        zypper)
-            zypper --non-interactive install \
-                gcc make glibc-devel libopenssl-devel zlib-devel \
-                ca-certificates curl wget tar gzip || {
-                print_error "Gagal memasang dependensi Zypper"
-                return 1
-            }
-            ;;
-        pacman)
-            pacman -Sy --noconfirm \
-                base-devel openssl zlib ca-certificates curl wget tar gzip || {
-                print_error "Gagal memasang dependensi Pacman"
-                return 1
-            }
-            ;;
-    esac
-
-    # Pastikan compiler dan library tersedia
-    for cmd in gcc make tar; do
-        if ! command -v "$cmd" >/dev/null 2>&1; then
-            print_error "Program $cmd tidak ditemukan"
-            return 1
-        fi
-    done
-
-    # Siapkan direktori sementara
-    WORKDIR="$(mktemp -d /tmp/haproxy-build.XXXXXX)" || {
-        print_error "Gagal membuat direktori sementara"
-        return 1
-    }
-
-    TARBALL="${WORKDIR}/haproxy-${VERSION}.tar.gz"
-
-    # Download source resmi
-    print_install "Mengunduh HAProxy ${VERSION}"
-
-    if command -v curl >/dev/null 2>&1; then
-        curl -fL --retry 3 --connect-timeout 20 \
-            "${BASE_URL}/haproxy-${VERSION}.tar.gz" \
-            -o "$TARBALL" || {
-            rm -rf "$WORKDIR"
-            print_error "Gagal mengunduh source HAProxy"
-            return 1
-        }
-    else
-        wget -q --tries=3 \
-            "${BASE_URL}/haproxy-${VERSION}.tar.gz" \
-            -O "$TARBALL" || {
-            rm -rf "$WORKDIR"
-            print_error "Gagal mengunduh source HAProxy"
-            return 1
-        }
-    fi
-
-    # Ekstrak source
-    tar -xzf "$TARBALL" -C "$WORKDIR" || {
-        rm -rf "$WORKDIR"
-        print_error "Gagal mengekstrak source HAProxy"
-        return 1
-    }
-
-    SOURCE_DIR="${WORKDIR}/haproxy-${VERSION}"
-
-    if [ ! -d "$SOURCE_DIR" ]; then
-        rm -rf "$WORKDIR"
-        print_error "Direktori source tidak ditemukan"
-        return 1
-    fi
-
-    # Build HAProxy
-    JOBS="$(nproc 2>/dev/null || echo 1)"
-    case "$JOBS" in
-        ''|*[!0-9]*) JOBS=1 ;;
-    esac
-    [ "$JOBS" -lt 1 ] && JOBS=1
-
-    print_install "Build HAProxy ${VERSION} menggunakan ${JOBS} core"
-
-    if ! make -C "$SOURCE_DIR" -j"$JOBS" \
-        TARGET="$TARGET" \
-        USE_OPENSSL=1 \
-        USE_ZLIB=1 \
-        >"$BUILD_LOG" 2>&1; then
-
-        tail -n 40 "$BUILD_LOG" 2>/dev/null
-        rm -rf "$WORKDIR"
-        print_error "Build HAProxy gagal. Lihat $BUILD_LOG"
-        return 1
-    fi
-
-    # Pastikan hasil build benar
-    if [ ! -x "${SOURCE_DIR}/haproxy" ]; then
-        rm -rf "$WORKDIR"
-        print_error "Binary HAProxy hasil build tidak ditemukan"
-        return 1
-    fi
-
-    if ! "${SOURCE_DIR}/haproxy" -v 2>/dev/null |
-        head -n 1 | grep -Fq "version ${VERSION}"; then
-        rm -rf "$WORKDIR"
-        print_error "Versi binary hasil build tidak sesuai"
-        return 1
-    fi
-
-    # Periksa konfigurasi sebelum mengganti binary
-    if [ -f /etc/haproxy/haproxy.cfg ]; then
-        if ! "${SOURCE_DIR}/haproxy" -c -f /etc/haproxy/haproxy.cfg; then
-            rm -rf "$WORKDIR"
-            print_error "Konfigurasi HAProxy tidak valid; binary lama dipertahankan"
-            return 1
-        fi
-    fi
-
-    # Deteksi status service
-    if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-active --quiet haproxy; then
-            WAS_ACTIVE="yes"
-        fi
-    fi
-
-    # Backup binary lama
-    mkdir -p "$(dirname "$DEST")" || {
-        rm -rf "$WORKDIR"
-        print_error "Gagal menyiapkan direktori instalasi"
-        return 1
-    }
-
-    if [ -e "$DEST" ]; then
-        BACKUP="${DEST}.backup.$(date +%Y%m%d%H%M%S)"
-        cp -p "$DEST" "$BACKUP" || {
-            rm -rf "$WORKDIR"
-            print_error "Gagal membuat backup HAProxy"
-            return 1
-        }
-    elif [ -n "$OLD_BIN" ] && [ -f "$OLD_BIN" ]; then
-        BACKUP="${DEST}.backup.$(date +%Y%m%d%H%M%S)"
-        cp -p "$OLD_BIN" "$BACKUP" || {
-            rm -rf "$WORKDIR"
-            print_error "Gagal membuat backup binary lama"
-            return 1
-        }
-    fi
-
-    # Pasang binary baru secara atomik
-    if ! install -m 0755 "${SOURCE_DIR}/haproxy" "${DEST}.new"; then
-        rm -rf "$WORKDIR"
-        print_error "Gagal menyalin binary HAProxy"
-        return 1
-    fi
-
-    if ! mv -f "${DEST}.new" "$DEST"; then
-        rm -f "${DEST}.new"
-        rm -rf "$WORKDIR"
-        print_error "Gagal memasang binary HAProxy"
-        return 1
-    fi
-
-    # Validasi binary setelah dipasang
-    if ! "$DEST" -v 2>/dev/null |
-        head -n 1 | grep -Fq "version ${VERSION}"; then
-
-        print_error "Validasi gagal, mengembalikan binary sebelumnya"
-
-        if [ -n "$BACKUP" ] && [ -f "$BACKUP" ]; then
-            cp -p "$BACKUP" "$DEST"
-        else
-            rm -f "$DEST"
-        fi
-
-        rm -rf "$WORKDIR"
-        return 1
-    fi
-
-    # Restart hanya jika sebelumnya aktif
-    if [ "$WAS_ACTIVE" = "yes" ]; then
-        if ! systemctl restart haproxy; then
-            print_error "Service gagal restart, mengembalikan binary lama"
-
-            if [ -n "$BACKUP" ] && [ -f "$BACKUP" ]; then
-                cp -p "$BACKUP" "$DEST"
-                systemctl restart haproxy 2>/dev/null
-            fi
-
-            rm -rf "$WORKDIR"
-            return 1
-        fi
-    fi
-
-    rm -rf "$WORKDIR"
-
-    print_success "HAProxy ${VERSION} berhasil dipasang"
-    "$DEST" -v 2>/dev/null
-
-    return 0
+# ---------- 9. Setup Menu Utama & Limit Script ----------
+if [ -d "$SRC_DIR/v4-main/Cdy" ]; then
+  if [ -f "$SRC_DIR/v4-main/Cdy/menu.zip" ]; then
+    mkdir -p /tmp/menu-extract
+    unzip -qo "$SRC_DIR/v4-main/Cdy/menu.zip" -d /tmp/menu-extract
+    find /tmp/menu-extract -type f -exec cp {} /usr/bin/ \;
+    chmod +x /usr/bin/menu /usr/bin/cek-izin /usr/bin/xray-restart 2>/dev/null || true
+    rm -rf /tmp/menu-extract
+  fi
+  [ -f "$SRC_DIR/v4-main/Cdy/cek-izin" ] && cp "$SRC_DIR/v4-main/Cdy/cek-izin" /usr/bin/cek-izin && chmod +x /usr/bin/cek-izin
+  [ -f "$SRC_DIR/v4-main/Cdy/speedtest" ] && cp "$SRC_DIR/v4-main/Cdy/speedtest" /usr/bin/speedtest && chmod +x /usr/bin/speedtest
+fi
 }
 function first_setup(){
 timedatectl set-timezone Asia/Jakarta
