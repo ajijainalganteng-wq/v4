@@ -406,35 +406,47 @@ echo "& plughin Account" >>/etc/ssh/.ssh.db
 function install_xray() {
 clear
 print_install "Core Xray 25.1.30 Latest Version"
-domainSock_dir="/run/xray";! [ -d $domainSock_dir ] && mkdir  $domainSock_dir
-chown www-data.www-data $domainSock_dir
-latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
-bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version 25.1.30
-wget -O /etc/xray/config.json "${REPO}Cfg/config.json" >/dev/null 2>&1
-wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
-# Verifikasi Xray terpasang (install-release.sh pernah "sukses" padahal binary tidak ada)
-if [ ! -x /usr/local/bin/xray ] || ! /usr/local/bin/xray version 2>/dev/null | grep -q "25.1.30"; then
-print_error "Binary Xray 25.1.30 tidak ada setelah install-release.sh, unduh langsung dari zip resmi"
-cd /tmp && rm -rf xray-fix && mkdir xray-fix && cd xray-fix
-if wget -q https://github.com/XTLS/Xray-core/releases/download/v25.1.30/Xray-linux-64.zip -O Xray-linux-64.zip && [ "$(stat -c%s Xray-linux-64.zip)" -ge 10485760 ] && unzip -o Xray-linux-64.zip xray geoip.dat geosite.dat >/dev/null 2>&1; then
-install -m 755 xray /usr/local/bin/xray
-mkdir -p /usr/local/share/xray
-install -m 644 geoip.dat geosite.dat /usr/local/share/xray/
+# Unduh rilis resmi Xray
+  XRAY_ZIP="Xray-linux-64.zip"
+  XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/$XRAY_TAG_PIN/$XRAY_ZIP"
+  curl -fsSL "$XRAY_URL" -o "/tmp/$XRAY_ZIP"
+  unzip -qo "/tmp/$XRAY_ZIP" -d /tmp/xray-extract
+  mv /tmp/xray-extract/xray /usr/local/bin/xray
+  chmod +x /usr/local/bin/xray
+  rm -rf /tmp/$XRAY_ZIP /tmp/xray-extract
+
+  # Service systemd Xray
+  cat << EOF > /etc/systemd/system/xray.service
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  # Salin konfigurasi Cfg jika ada di repo
+  if [ -d "$SRC_DIR/v4-main/Cfg" ]; then
+    [ -f "$SRC_DIR/v4-main/Cfg/haproxy.cfg" ] && cp "$SRC_DIR/v4-main/Cfg/haproxy.cfg" /etc/haproxy/haproxy.cfg
+    [ -f "$SRC_DIR/v4-main/Cfg/nginx.conf" ] && cp "$SRC_DIR/v4-main/Cfg/nginx.conf" /etc/nginx/nginx.conf
+    mkdir -p /etc/nginx/conf.d
+    [ -f "$SRC_DIR/v4-main/Cfg/xray.conf" ] && cp "$SRC_DIR/v4-main/Cfg/xray.conf" /etc/nginx/conf.d/xray.conf
+  fi
+
+  systemctl daemon-reload
+  systemctl enable xray.service haproxy nginx
+  systemctl restart haproxy nginx xray.service || true
 fi
-cd /tmp
-fi
-[ -x /usr/local/bin/xray ] && /usr/local/bin/xray version 2>/dev/null | grep -q "25.1.30" || { print_error "Xray 25.1.30 gagal terpasang, install dibatalkan"; exit 1; }
-# Geo Loyalsoldier (geoip bawaan rilis tidak mengenal CLOUDFLARE sehingga config gagal load)
-mkdir -p /usr/local/share/xray
-wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat -O geoip.dat && mv geoip.dat /usr/local/share/xray/geoip.dat || print_error "Gagal unduh geoip.dat Loyalsoldier, pakai geo bawaan"
-wget -q https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat -O geosite.dat && mv geosite.dat /usr/local/share/xray/geosite.dat || print_error "Gagal unduh geosite.dat Loyalsoldier, pakai geo bawaan"
-# Log Xray milik www-data (service jalan sebagai www-data, file root-owned bikin exit 23)
-mkdir -p /var/log/xray
-touch /var/log/xray/access.log /var/log/xray/error.log
-chown www-data:www-data /var/log/xray /var/log/xray/access.log /var/log/xray/error.log
-/usr/local/bin/xray run -test -c /etc/xray/config.json || { print_error "Konfigurasi Xray tidak valid, install dibatalkan"; exit 1; }
-domain=$(cat /etc/xray/domain)
-IPVS=$(cat /etc/xray/ipvps)
 print_success "Core Xray 25.1.30 Latest Version"
 clear
 print_install "Memasang Konfigurasi Packet"
