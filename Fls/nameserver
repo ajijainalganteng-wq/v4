@@ -2,13 +2,13 @@
 set -euo pipefail
 REPOS="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/"
 ns_domain_cloudflare() {
-	DOMAIN="buyerserverpremium.web.id"
+	DOMAIN="server.satsetvpn.web.id"
 	DOMAIN_PATH=$(cat /etc/xray/domain)
 	SUB=$(cat /etc/xray/domain | cut -d "." -f1)
-	SUB_DOMAIN=${SUB}."buyerserverpremium.web.id"
+	SUB_DOMAIN=${SUB}."server.satsetvpn.web.id"
 	NS_DOMAIN="ns-${SUB_DOMAIN}"
-	CF_ID="ptrajaserverpremium@gmail.com"
-    CF_KEY="8d38e5ab5ee2d6f939c9f75c29fe9171936f6"
+	CF_ID="ajijainalganteng@gmail.com"
+    CF_KEY="507d5909dab363357fd089c9ff021e51"
 
 	IP=$(cat /usr/bin/ipsave)
 	echo "Updating DNS NS for ${NS_DOMAIN}..."
