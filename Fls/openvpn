@@ -126,7 +126,7 @@ mySiteOvpn
 sed -i "s|IP-ADDRESSS|$(curl -sS ifconfig.me)|g" /var/www/html/index.html
 }
 function install_ovpn() {
-ovpn_install
+install_ovpn
 config_easy
 make_follow
 make_follow
@@ -135,4 +135,3 @@ systemctl enable openvpn
 systemctl start openvpn
 /etc/init.d/openvpn restart
 }
-install_ovpn
