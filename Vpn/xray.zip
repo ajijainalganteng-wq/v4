@@ -196,7 +196,6 @@ touch /var/log/xray/access.log
 touch /var/log/xray/error.log
 touch /var/log/xray/access2.log
 touch /var/log/xray/error2.log
-;;
 esac
 done < /proc/meminfo
 Ram_Usage="$((mem_used / 1024))"
