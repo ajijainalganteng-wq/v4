@@ -626,7 +626,8 @@ echo "/usr/sbin/nologin" >> /etc/shells
 /etc/init.d/ssh restart
 /etc/init.d/dropbear restart
 wget -q ${REPO}install/setrsyslog.sh && chmod +x setrsyslog.sh && ./setrsyslog.sh}
-clear}
+clear
+}
 clear
 function ins_vnstat(){
 clear
