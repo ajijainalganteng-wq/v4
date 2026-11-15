@@ -187,13 +187,15 @@ fi
 }
 clear
 print_install "Membuat direktori xray"
-mkdir -p /etc/xray
-curl -s ifconfig.me > /etc/xray/ipvps
+# Make Folder XRay
 mkdir -p /var/log/xray
+mkdir -p /etc/xray
 chown www-data.www-data /var/log/xray
 chmod +x /var/log/xray
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
+touch /var/log/xray/access2.log
+touch /var/log/xray/error2.log
 mkdir -p /var/lib/kyt >/dev/null 2>&1
 while IFS=":" read -r a b; do
 case $a in
