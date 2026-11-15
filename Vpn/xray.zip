@@ -187,24 +187,33 @@ fi
 }
 clear
 print_install "Membuat direktori xray"
+
 # Make Folder XRay
 mkdir -p /var/log/xray
 mkdir -p /etc/xray
-chown www-data.www-data /var/log/xray
-chmod +x /var/log/xray
+
+chown -R www-data:www-data /var/log/xray
+chmod 755 /var/log/xray
+
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
 touch /var/log/xray/access2.log
 touch /var/log/xray/error2.log
-esac
-done < /proc/meminfo
+
+# Memory Information
+mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+mem_available=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+
+mem_used=$((mem_total - mem_available))
+
 Ram_Usage="$((mem_used / 1024))"
 Ram_Total="$((mem_total / 1024))"
-export tanggal=`date -d "0 days" +"%d-%m-%Y - %X" `
-export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/PRETTY_NAME//g' | sed 's/=//g' | sed 's/"//g' )
-export Kernel=$( uname -r )
-export Arch=$( uname -m )
-export IP=$( curl -s https://ipinfo.io/ip/ )
+
+export tanggal=$(date +"%d-%m-%Y - %X")
+export OS_Name=$(grep -w PRETTY_NAME /etc/os-release | head -n1 | sed 's/PRETTY_NAME//g; s/=//g; s/"//g')
+export Kernel=$(uname -r)
+export Arch=$(uname -m)
+export IP=$(curl -4 -s --max-time 10 https://ipinfo.io/ip/)
 function install_haproxy_2033(){
 print_install "Menginstall HAProxy 2.0.33 dari source (Ubuntu 20/22/24 dan Debian 10+)"
 if haproxy -v 2>/dev/null | grep -q "2\.0"; then print_success "HAProxy 2.0 sudah terpasang, lewati build"; return 0; fi
