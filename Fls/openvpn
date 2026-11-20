@@ -1,4 +1,5 @@
 #!/bin/bash
+# FIX-OVPN-V2 (penanda versi: dipakai installer untuk memastikan salinan GitHub tidak usang)
 export DEBIAN_FRONTEND=noninteractive
 OS=`uname -m`;
 MYIP=$(wget -qO- ipinfo.io/ip);
@@ -7,15 +8,37 @@ MYIP2="s/xxxxxxxxx/$domain/g";
 function ovpn_install() {
 rm -rf /etc/openvpn
 mkdir -p /etc/openvpn
-wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/arivpnstores/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
-unzip -d /etc/openvpn/ /etc/openvpn/vpn.zip
+wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
+unzip -o -d /etc/openvpn/ /etc/openvpn/vpn.zip
 rm -f /etc/openvpn/vpn.zip
+# [FIX] jangan lanjut diam-diam bila vpn.zip gagal diunduh/diekstrak (openssl di bawah akan menulis ke folder yang salah)
+[ -s /etc/openvpn/server/server-tcp.conf ] && [ -s /etc/openvpn/server/server-udp.conf ] || { echo "vpn.zip gagal diunduh/diekstrak"; exit 1; }
+# Sertifikat server bawaan sudah kedaluwarsa (2023) dan vpn.zip TIDAK memuat ca.key maupun server.key.
+# [FIX] bila ca.key tidak ada, buat CA baru; lalu terbitkan sertifikat server baru yang ditandatangani CA tsb.
+cd /etc/openvpn/server || exit 1
+if [ ! -s ca.key ]; then
+openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3650 -sha256 -subj "/CN=ChangeMe" || exit 1
+fi
+openssl genrsa -out server.key 2048 || exit 1
+openssl req -new -key server.key -out server.csr -subj "/CN=server" || exit 1
+printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > server.ext
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650 -sha256 -extfile server.ext || exit 1
+chmod 600 ca.key server.key
+rm -f server.csr server.ext
 chown -R root:root /etc/openvpn/server/easy-rsa/
 }
 function config_easy() {
 cd
 mkdir -p /usr/lib/openvpn/
-cp /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so /usr/lib/openvpn/openvpn-plugin-auth-pam.so
+# [FIX] lokasi plugin PAM bisa berbeda antar distro/arsitektur
+PAMSO=$(find /usr/lib -name 'openvpn-plugin-auth-pam.so' 2>/dev/null | grep -v '^/usr/lib/openvpn/' | head -n 1)
+cp "$PAMSO" /usr/lib/openvpn/openvpn-plugin-auth-pam.so || exit 1
+# [FIX] OpenVPN >= 2.6: allow-compression default "no" menolak comp-lzo di config server
+OVPNV=$(openvpn --version 2>/dev/null | head -n1 | awk '{print $2}')
+if [[ "$OVPNV" =~ ^2\.([5-9]|[1-9][0-9])\. || "$OVPNV" =~ ^[3-9]\. ]]; then
+for f in server-tcp.conf server-udp.conf; do grep -q '^allow-compression' /etc/openvpn/server/$f || echo 'allow-compression yes' >> /etc/openvpn/server/$f; done
+fi
+systemctl reset-failed 'openvpn-server@*' >/dev/null 2>&1
 sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
 systemctl enable --now openvpn-server@server-tcp
 systemctl enable --now openvpn-server@server-udp
@@ -107,24 +130,44 @@ cat <<'mySiteOvpn' > /var/www/html/index.html
 <!DOCTYPE html>
 <html lang="en">
 <!-- Simple OVPN Download site -->
-<head><meta charset="utf-8" /><title>OVPN Config Download</title><meta name="description" content="Server" /><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" /><meta name="theme-color" content="#000000" /><link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.2/css/all.css"><link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdnjs.cloudflare.com/ajax/libs/mdbootstrap/4.8.3/css/mdb.min.css" rel="stylesheet"></head><body><div class="container justify-content-center" style="margin-top:9em;margin-bottom:5em;"><div class="col-md"><div class="view"><img src="https://openvpn.net/wp-content/uploads/openvpn.jpg" class="card-img-top"><div class="mask rgba-white-slight"></div></div><div class="card"><div class="card-body"><h5 class="card-title">Config List</h5><br /><ul class="list-group">
-<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>TCP <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/tcp.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
-<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>UDP <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/udp.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
-<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>SSL <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/ssl.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
-<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p> WS SSL <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/ws-ssl.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
-<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p> ALL.zip <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/Kyt-Project.zip" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
-</ul></div></div></div></div></body></html>
+<head><meta charset="utf-8"><title>OpenVPN Config Download</title></head>
+<body>
+<h2>OpenVPN Config Download</h2>
+<ul>
+<li><a href="tcp.ovpn">OpenVPN TCP</a></li>
+<li><a href="udp.ovpn">OpenVPN UDP</a></li>
+<li><a href="ssl.ovpn">OpenVPN SSL</a></li>
+<li><a href="ws-ssl.ovpn">OpenVPN WS-SSL</a></li>
+<li><a href="Kyt-Project.zip">Semua config (zip)</a></li>
+</ul>
+</body>
+</html>
 mySiteOvpn
-sed -i "s|IP-ADDRESSS|$(curl -sS ifconfig.me)|g" /var/www/html/index.html
-}
-function install_ovpn() {
-ovpn_install
-config_easy
-make_follow
-make_follow
-cert_ovpn
+
+#firewall untuk memperbolehkan akses UDP dan akses jalur TCP
+# [FIX] $ANU tidak pernah didefinisikan -> aturan MASQUERADE gagal
+ANU=$(ip -o -4 route show to default | awk '{print $5}' | head -n 1)
+iptables -t nat -I POSTROUTING -s 10.6.0.0/24 -o $ANU -j MASQUERADE
+iptables -t nat -I POSTROUTING -s 10.7.0.0/24 -o $ANU -j MASQUERADE
+iptables-save > /etc/iptables.up.rules
+chmod +x /etc/iptables.up.rules
+
+iptables-restore -t < /etc/iptables.up.rules
+netfilter-persistent save
+netfilter-persistent reload
+
+# Restart service openvpn
 systemctl enable openvpn
 systemctl start openvpn
 /etc/init.d/openvpn restart
+
+# Delete script
+history -c
+rm -f /root/vpn.sh
 }
-install_ovpn
+# [FIX] file asli terpotong dan tidak memanggil satu pun fungsi di atas
+ovpn_install
+config_easy
+make_follow
+cert_ovpn
+[ -s /etc/openvpn/server/server.crt ] && [ -s /etc/openvpn/server/server.key ] && [ -s /etc/openvpn/server/ca.crt ] || exit 1
