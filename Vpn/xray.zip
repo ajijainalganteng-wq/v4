@@ -453,34 +453,108 @@ IPVS=$(cat /etc/xray/ipvps)
 print_success "Core Xray 25.1.30 Latest Version"
 clear
 print_install "Memasang Konfigurasi Packet"
-wget -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg" >/dev/null 2>&1
-wget -O /etc/nginx/conf.d/xray.conf "${REPO}Cfg/xray.conf" >/dev/null 2>&1
+curl -fsSL "${REPO}Cfg/haproxy.cfg" -o /etc/haproxy/haproxy.cfg || {
+print_error "Gagal mengambil konfigurasi HAProxy"
+return 1
+}
+curl -fsSL "${REPO}Cfg/xray.conf" -o /etc/nginx/conf.d/xray.conf || {
+print_error "Gagal mengambil konfigurasi Nginx Xray"
+return 1
+}
+curl -fsSL "${REPO}Cfg/nginx.conf" -o /etc/nginx/nginx.conf || {
+print_error "Gagal mengambil konfigurasi utama Nginx"
+return 1
+}
 sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
-cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem >/dev/null 2>&1
-haproxy -c -f /etc/haproxy/haproxy.cfg || { print_error "Konfigurasi HAProxy tidak valid, install dibatalkan"; exit 1; }
+# [FIX] "bind-process" sudah DIHAPUS sejak HAProxy 2.7 -> error fatal di HAProxy 3.4; juga buang baris bind kembar
+sed -i -E '/^[[:space:]]*bind-process([[:space:]]|$)/d' /etc/haproxy/haproxy.cfg
+awk '/^(global|defaults|frontend|backend|listen)([[:space:]]|$)/{delete seen} /^[[:space:]]*bind[[:space:]]/{k=$0; gsub(/[[:space:]]+/," ",k); if(k in seen) next; seen[k]=1} {print}' /etc/haproxy/haproxy.cfg > /etc/haproxy/haproxy.cfg.new && mv /etc/haproxy/haproxy.cfg.new /etc/haproxy/haproxy.cfg
+install -d -o haproxy -g haproxy -m 0755 /run/haproxy >/dev/null 2>&1 || mkdir -p /run/haproxy
 sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
-curl ${REPO}Cfg/nginx.conf > /etc/nginx/nginx.conf
-cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem >/dev/null 2>&1
-chmod +x /etc/systemd/system/runn.service
-rm -rf /etc/systemd/system/xray.service.d
+cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/hap.pem || return 1
+chmod 600 /etc/haproxy/hap.pem
+chmod 644 /etc/xray/config.json
 cat >/etc/systemd/system/xray.service <<EOF
 [Unit]
 Description=Xray Service
-Documentation=https://github.com
-After=network.target nss-lookup.target
+Documentation=https://github.com/XTLS/Xray-core
+After=network-online.target nss-lookup.target
+Wants=network-online.target
+
 [Service]
 User=www-data
+Group=www-data
+WorkingDirectory=/usr/local/bin
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
+LimitNPROC=10000
+LimitNOFILE=1000000
+ExecStartPre=/usr/local/bin/xray run -test -config /etc/xray/config.json
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 Restart=on-failure
 RestartPreventExitStatus=23
-LimitNPROC=10000
-LimitNOFILE=1000000
+UMask=0007
+
 [Install]
 WantedBy=multi-user.target
 EOF
+# [FIX] kode geoip yang tidak ada di geoip.dat (mis. geoip:yt) membuat Xray gagal total; buang hanya kode tsb lalu uji ulang
+xray_test_ok=0
+for _try in 1 2 3 4 5 6 7 8 9 10; do
+if xray_test_out=$(/usr/local/bin/xray run -test -config /etc/xray/config.json 2>&1); then xray_test_ok=1; break; fi
+bad_geo=$(echo "$xray_test_out" | grep -oiE 'code not found in geoip\.dat: *[A-Za-z0-9_!-]+' | head -n1 | sed -E 's/.*: *//')
+[[ -z "$bad_geo" ]] && break
+print_error "Kode geoip '${bad_geo}' tidak ada di geoip.dat; dihapus dari routing /etc/xray/config.json"
+python3 - "$bad_geo" <<'GEOPY'
+import re, sys
+code = re.escape(sys.argv[1].lower())
+path = '/etc/xray/config.json'
+text = open(path, encoding='utf-8').read()
+for pat in (r'"geoip:' + code + r'"\s*,\s*', r'\s*,\s*"geoip:' + code + r'"', r'"geoip:' + code + r'"'):
+    new, n = re.subn(pat, '', text, flags=re.I)
+    if n:
+        open(path, 'w', encoding='utf-8').write(new)
+        break
+GEOPY
+done
+if [[ "$xray_test_ok" != "1" ]]; then
+echo "$xray_test_out"
+print_error "Konfigurasi Xray tidak valid; service tidak dijalankan"
+return 1
+fi
+# [FIX] haproxy -c: buang direktif tuning "tune.*" yang sudah dihapus di versi baru lalu uji ulang
+haproxy_test_ok=0
+for _try in 1 2 3 4 5; do
+if haproxy_test_out=$(haproxy -c -f /etc/haproxy/haproxy.cfg 2>&1); then haproxy_test_ok=1; break; fi
+bad_kw=$(echo "$haproxy_test_out" | grep -oE "unknown keyword '(tune\.[A-Za-z0-9._-]+)'" | head -n1 | sed -E "s/.*'(.*)'/\1/")
+[[ -z "$bad_kw" ]] && break
+print_error "Direktif HAProxy '${bad_kw}' tidak dikenal di versi ini; dihapus dari haproxy.cfg"
+sed -i -E "/^[[:space:]]*${bad_kw//./\\.}([[:space:]]|$)/d" /etc/haproxy/haproxy.cfg
+done
+if [[ "$haproxy_test_ok" != "1" ]]; then
+echo "$haproxy_test_out"
+print_error "Konfigurasi HAProxy tidak valid; service tidak dijalankan"
+return 1
+fi
+if ! nginx -t; then
+print_error "Konfigurasi Nginx tidak valid; service tidak dijalankan"
+return 1
+fi
+systemctl daemon-reload
+systemctl enable xray haproxy nginx >/dev/null 2>&1; systemctl restart xray haproxy nginx || {
+print_error "Gagal mengaktifkan service Xray/HAProxy/Nginx"
+return 1
+}
+for service_name in xray haproxy nginx; do
+if ! systemctl is-active --quiet "$service_name"; then
+print_error "Service ${service_name} belum aktif"
+systemctl status "$service_name" --no-pager -l
+return 1
+fi
+done
 print_success "Konfigurasi Packet"
 }
 function ssh(){
