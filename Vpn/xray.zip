@@ -111,8 +111,6 @@ apt install ruby rubygems -y
 gem install lolcat --no-document 
 apt install dos2unix -y
 apt install python3 -y 
-apt install socat -y 
-apt install netcat -y 
 apt install ufw -y 
 apt install telnet -y 
 apt install iputils-ping -y
