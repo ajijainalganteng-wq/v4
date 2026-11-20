@@ -219,6 +219,8 @@ export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
 function install_haproxy_34() {
+clear
+print_install "intal haproxy 3.4"
 local haproxy_version="3.4.7"
 local build_dir="/usr/local/src/haproxy-${haproxy_version}"
 local archive="/tmp/haproxy-${haproxy_version}.tar.gz"
