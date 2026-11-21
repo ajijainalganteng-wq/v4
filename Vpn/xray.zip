@@ -1008,64 +1008,298 @@ rm -f /root/vnstat-2.6.tar.gz
 rm -rf /root/vnstat-2.6
 print_success "Vnstat"
 }
-function ins_openvpn(){
-clear
-print_install "Menginstall OpenVPN"
-apt-get install -y openvpn easy-rsa unzip libpam0g-dev || {
-print_error "Gagal memasang paket OpenVPN"
-return 1
-}
-if [[ ! -f /etc/systemd/system/openvpn-server@.service && ! -f /lib/systemd/system/openvpn-server@.service && ! -f /usr/lib/systemd/system/openvpn-server@.service ]]; then
-mkdir -p /etc/systemd/system
-cat >/etc/systemd/system/openvpn-server@.service <<'EOF'
+
+function ins_openvpn() {
+    clear
+    print_install "Menginstall OpenVPN"
+
+    # ==========================================
+    # 1. PEMERIKSAAN AWAL
+    # ==========================================
+
+    if [[ $EUID -ne 0 ]]; then
+        print_error "Instalasi OpenVPN harus dijalankan sebagai root"
+        return 1
+    fi
+
+    if [[ -z "${REPO:-}" ]]; then
+        print_error "Variabel REPO belum dikonfigurasi"
+        return 1
+    fi
+
+    local repo="${REPO%/}/"
+    local installer="/root/openvpn"
+    local temp_installer
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "Curl belum terpasang"
+        return 1
+    fi
+
+    # ==========================================
+    # 2. UPDATE DAN INSTALL DEPENDENCIES
+    # ==========================================
+
+    print_install "Memasang paket OpenVPN dan dependensi"
+
+    export DEBIAN_FRONTEND=noninteractive
+
+    if ! apt-get update; then
+        print_error "Gagal memperbarui daftar paket APT"
+        return 1
+    fi
+
+    if ! apt-get install -y \
+        openvpn \
+        easy-rsa \
+        unzip \
+        libpam0g-dev; then
+
+        print_error "Gagal memasang paket OpenVPN"
+        return 1
+    fi
+
+    if [[ ! -x /usr/sbin/openvpn ]] && ! command -v openvpn >/dev/null 2>&1; then
+        print_error "Binary OpenVPN tidak ditemukan"
+        return 1
+    fi
+
+    print_success "Paket OpenVPN berhasil dipasang"
+
+    # ==========================================
+    # 3. DOWNLOAD SCRIPT OPENVPN DARI GITHUB
+    # ==========================================
+
+    print_install "Mengunduh file OpenVPN dari repository GitHub"
+
+    temp_installer=$(mktemp /root/openvpn.XXXXXX) || {
+        print_error "Gagal membuat file sementara"
+        return 1
+    }
+
+    if ! curl -fLsS \
+        --connect-timeout 20 \
+        --max-time 300 \
+        --retry 3 \
+        --retry-delay 3 \
+        "${repo}Fls/openvpn" \
+        -o "$temp_installer"; then
+
+        rm -f "$temp_installer"
+        print_error "Gagal mengunduh Fls/openvpn dari GitHub"
+        print_error "Periksa URL REPO dan koneksi VPS"
+        return 1
+    fi
+
+    # Memastikan file tidak kosong
+
+    if [[ ! -s "$temp_installer" ]]; then
+        rm -f "$temp_installer"
+        print_error "File OpenVPN hasil download kosong"
+        return 1
+    fi
+
+    # Memastikan bukan halaman HTML GitHub
+
+    if head -c 2048 "$temp_installer" | grep -Eiq \
+        '<!DOCTYPE html|<html|404: Not Found|Access denied'; then
+
+        rm -f "$temp_installer"
+        print_error "File yang diunduh bukan script OpenVPN"
+        return 1
+    fi
+
+    # Mengatasi format CRLF
+
+    sed -i 's/\r$//' "$temp_installer"
+
+    # Memeriksa sintaks Bash
+
+    if ! bash -n "$temp_installer"; then
+        rm -f "$temp_installer"
+        print_error "Script OpenVPN dari GitHub memiliki kesalahan sintaks"
+        return 1
+    fi
+
+    install -m 0755 "$temp_installer" "$installer"
+    rm -f "$temp_installer"
+
+    if [[ ! -s "$installer" || ! -x "$installer" ]]; then
+        print_error "File installer OpenVPN gagal disimpan"
+        return 1
+    fi
+
+    print_success "Script OpenVPN berhasil diunduh dari GitHub"
+
+    # ==========================================
+    # 4. MENJALANKAN SCRIPT KONFIGURASI
+    # ==========================================
+
+    print_install "Menjalankan konfigurasi OpenVPN"
+
+    if ! bash "$installer"; then
+        print_error "Script konfigurasi OpenVPN gagal dijalankan"
+        return 1
+    fi
+
+    # ==========================================
+    # 5. MEMERIKSA HASIL KONFIGURASI
+    # ==========================================
+
+    print_install "Memeriksa konfigurasi OpenVPN"
+
+    if [[ ! -s /etc/openvpn/server/server-tcp.conf ]]; then
+        print_error "server-tcp.conf tidak ditemukan atau kosong"
+        return 1
+    fi
+
+    if [[ ! -s /etc/openvpn/server/server-udp.conf ]]; then
+        print_error "server-udp.conf tidak ditemukan atau kosong"
+        return 1
+    fi
+
+    # Menghapus directive daemon agar systemd
+    # dapat mengelola proses OpenVPN secara langsung
+
+    sed -i '/^[[:space:]]*daemon\([[:space:]]\|$\)/d' \
+        /etc/openvpn/server/server-tcp.conf \
+        /etc/openvpn/server/server-udp.conf
+
+    print_success "Konfigurasi TCP dan UDP ditemukan"
+
+    # ==========================================
+    # 6. MEMBUAT SYSTEMD SERVICE
+    # ==========================================
+
+    print_install "Membuat service OpenVPN TCP dan UDP"
+
+    mkdir -p /etc/systemd/system
+    mkdir -p /etc/openvpn/server
+
+    cat > /etc/systemd/system/openvpn-server@.service <<'EOF'
 [Unit]
-Description=OpenVPN server instance %i
+Description=OpenVPN Server Instance %i
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=/etc/openvpn/server
+
 RuntimeDirectory=openvpn-server-%i
 RuntimeDirectoryMode=0755
+
 ExecStart=/usr/sbin/openvpn --config /etc/openvpn/server/%i.conf --status /run/openvpn-server-%i/status.log --status-version 2
+
 Restart=on-failure
 RestartSec=5s
+
 LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
 EOF
-fi
-systemctl daemon-reload
-wget -q -O /root/openvpn "${REPO}Fls/openvpn" || {
-print_error "Gagal mengambil installer OpenVPN dari repository"
-return 1
-}
-chmod +x /root/openvpn
-bash /root/openvpn || {
-print_error "Script konfigurasi OpenVPN dari repository gagal dijalankan"
-return 1
-}
-if [[ ! -s /etc/openvpn/server/server-tcp.conf || ! -s /etc/openvpn/server/server-udp.conf ]]; then
-print_error "File konfigurasi server-tcp/server-udp tidak ditemukan"
-return 1
-fi
-sed -i '/^[[:space:]]*daemon[[:space:]]*$/d' /etc/openvpn/server/server-tcp.conf /etc/openvpn/server/server-udp.conf
-systemctl daemon-reload
-systemctl enable --now openvpn-server@server-tcp openvpn-server@server-udp || {
-print_error "Gagal mengaktifkan service OpenVPN TCP/UDP"
-systemctl status openvpn-server@server-tcp openvpn-server@server-udp --no-pager -l
-return 1
-}
-for service_name in openvpn-server@server-tcp openvpn-server@server-udp; do
-if ! systemctl is-active --quiet "$service_name"; then
-print_error "Service ${service_name} belum aktif"
-systemctl status "$service_name" --no-pager -l
-return 1
-fi
-done
-print_success "OpenVPN"
+
+    chmod 644 /etc/systemd/system/openvpn-server@.service
+
+    # ==========================================
+    # 7. VALIDASI BINARY DAN KONFIGURASI
+    # ==========================================
+
+    print_install "Memvalidasi instalasi OpenVPN"
+
+    openvpn --version || {
+        print_error "OpenVPN tidak dapat dijalankan"
+        return 1
+    }
+
+    # ==========================================
+    # 8. RELOAD SYSTEMD
+    # ==========================================
+
+    systemctl daemon-reload || {
+        print_error "Gagal memuat ulang systemd"
+        return 1
+    }
+
+    # ==========================================
+    # 9. ENABLE SERVICE TCP UDP
+    # ==========================================
+
+    print_install "Mengaktifkan OpenVPN TCP dan UDP"
+
+    if ! systemctl enable \
+        openvpn-server@server-tcp \
+        openvpn-server@server-udp; then
+
+        print_error "Gagal mengaktifkan service OpenVPN"
+        return 1
+    fi
+
+    systemctl reset-failed \
+        openvpn-server@server-tcp \
+        openvpn-server@server-udp 2>/dev/null
+
+    if ! systemctl restart openvpn-server@server-tcp; then
+        print_error "OpenVPN TCP gagal dijalankan"
+
+        journalctl -u openvpn-server@server-tcp \
+            -n 40 --no-pager
+
+        return 1
+    fi
+
+    if ! systemctl restart openvpn-server@server-udp; then
+        print_error "OpenVPN UDP gagal dijalankan"
+
+        journalctl -u openvpn-server@server-udp \
+            -n 40 --no-pager
+
+        return 1
+    fi
+
+    # ==========================================
+    # 10. PEMERIKSAAN STATUS SERVICE
+    # ==========================================
+
+    print_install "Memeriksa status OpenVPN"
+
+    for service_name in \
+        openvpn-server@server-tcp \
+        openvpn-server@server-udp; do
+
+        if ! systemctl is-active --quiet "$service_name"; then
+
+            print_error "Service ${service_name} belum aktif"
+
+            systemctl status "$service_name" \
+                --no-pager -l
+
+            journalctl -u "$service_name" \
+                -n 40 --no-pager
+
+            return 1
+        fi
+
+        print_success "Service ${service_name} berhasil berjalan"
+    done
+
+    # ==========================================
+    # 11. SELESAI
+    # ==========================================
+
+    print_success "OpenVPN berhasil diinstal dan berjalan"
+
+    echo ""
+    echo "======================================"
+    echo " OPENVPN INSTALLATION COMPLETED"
+    echo "======================================"
+    echo " OpenVPN : INSTALLED"
+    echo " TCP     : RUNNING"
+    echo " UDP     : RUNNING"
+    echo "======================================"
+
+    return 0
 }
 
 function ins_backup() {
