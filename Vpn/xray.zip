@@ -816,7 +816,7 @@ function ins_backup() {
     wget -O /root/.config/rclone/rclone.conf "${REPO}Cfg/rclone.conf"
 
     cd /bin
-    git clone https://github.com/ajijainalganteng-wq/wondershaper.git
+    git clone https://github.com/arivpnstores/wondershaper.git
     cd wondershaper
     sudo make install
     cd
