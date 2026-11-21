@@ -373,105 +373,411 @@ echo "& plughin Account" >>/etc/trojan/.trojan.db
 echo "& plughin Account" >>/etc/shadowsocks/.shadowsocks.db
 echo "& plughin Account" >>/etc/ssh/.ssh.db
 }
+
 function install_xray() {
-clear
-print_install "Menginstall Core Xray versi stabil terbaru"
-domainSock_dir="/run/xray"
-install -d -o www-data -g www-data -m 0755 "$domainSock_dir" /var/log/xray
-touch /var/log/xray/access.log /var/log/xray/error.log
-chown -R www-data:www-data /var/log/xray
-chmod 750 /var/log/xray
-bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data || {
-print_error "Gagal menginstall Xray Core"
-return 1
-}
-mkdir -p /etc/xray /etc/haproxy /etc/nginx/conf.d
-curl -fsSL "${REPO}Cfg/config.json" -o /etc/xray/config.json || {
-print_error "Gagal mengambil config Xray dari repository"
-return 1
-}
-curl -fsSL "${REPO}Fls/runn.service" -o /etc/systemd/system/runn.service || {
-print_error "Gagal mengambil runn.service dari repository"
-return 1
-}
-domain=$(cat /etc/xray/domain 2>/dev/null)
-IPVS=$(cat /etc/xray/ipvps 2>/dev/null)
-if [[ -z "$domain" || ! -s /etc/xray/xray.crt || ! -s /etc/xray/xray.key ]]; then
-print_error "Domain atau sertifikat SSL Xray tidak ditemukan"
-return 1
-fi
-print_success "Core Xray terbaru"
-clear
-print_install "Memasang Konfigurasi Packet"
-curl -fsSL "${REPO}Cfg/haproxy.cfg" -o /etc/haproxy/haproxy.cfg || {
-print_error "Gagal mengambil konfigurasi HAProxy"
-return 1
-}
-curl -fsSL "${REPO}Cfg/xray.conf" -o /etc/nginx/conf.d/xray.conf || {
-print_error "Gagal mengambil konfigurasi Nginx Xray"
-return 1
-}
-curl -fsSL "${REPO}Cfg/nginx.conf" -o /etc/nginx/nginx.conf || {
-print_error "Gagal mengambil konfigurasi utama Nginx"
-return 1
-}
-sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
-sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
-cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/hap.pem || return 1
-chmod 600 /etc/haproxy/hap.pem
-chmod 644 /etc/xray/config.json
-cat >/etc/systemd/system/xray.service <<EOF
+    clear
+    print_install "Menginstall Xray Core versi stabil terbaru"
+
+    # ==========================================
+    # 1. PEMERIKSAAN AWAL
+    # ==========================================
+
+    if [[ $EUID -ne 0 ]]; then
+        print_error "Instalasi Xray harus dijalankan sebagai root"
+        return 1
+    fi
+
+    if [[ -z "${REPO:-}" ]]; then
+        print_error "Variabel REPO belum dikonfigurasi"
+        return 1
+    fi
+
+    local repo="${REPO%/}/"
+    local installer
+    local domain
+    local IPVS
+
+    if ! command -v curl >/dev/null 2>&1; then
+        print_error "Curl belum terpasang"
+        return 1
+    fi
+
+    if ! command -v systemctl >/dev/null 2>&1; then
+        print_error "Systemd tidak ditemukan"
+        return 1
+    fi
+
+    if ! id www-data >/dev/null 2>&1; then
+        print_error "User www-data tidak ditemukan"
+        return 1
+    fi
+
+    if ! command -v haproxy >/dev/null 2>&1; then
+        print_error "HAProxy belum terpasang"
+        return 1
+    fi
+
+    if ! command -v nginx >/dev/null 2>&1; then
+        print_error "Nginx belum terpasang"
+        return 1
+    fi
+
+    # ==========================================
+    # 2. MEMBUAT DIREKTORI
+    # ==========================================
+
+    install -d -o www-data -g www-data -m 0755 /run/xray
+    install -d -o www-data -g www-data -m 0750 /var/log/xray
+    install -d -o root -g www-data -m 0750 /etc/xray
+
+    touch /var/log/xray/access.log
+    touch /var/log/xray/error.log
+
+    chown www-data:www-data /var/log/xray/access.log
+    chown www-data:www-data /var/log/xray/error.log
+
+    # ==========================================
+    # 3. DOWNLOAD INSTALLER RESMI XRAY
+    # ==========================================
+
+    print_install "Mengunduh installer resmi Xray Core"
+
+    installer=$(mktemp /tmp/xray-installer.XXXXXX) || {
+        print_error "Gagal membuat file installer sementara"
+        return 1
+    }
+
+    if ! curl -fLsS --retry 3 --retry-delay 2 \
+        "https://github.com/XTLS/Xray-install/raw/main/install-release.sh" \
+        -o "$installer"; then
+
+        rm -f "$installer"
+        print_error "Gagal mengunduh installer Xray dari GitHub"
+        return 1
+    fi
+
+    if [[ ! -s "$installer" ]] || ! bash -n "$installer"; then
+        rm -f "$installer"
+        print_error "File installer Xray rusak atau tidak valid"
+        return 1
+    fi
+
+    print_install "Memasang Xray Core dan GeoData"
+
+    if ! bash "$installer" install -u www-data; then
+        rm -f "$installer"
+        print_error "Instalasi Xray Core gagal"
+        return 1
+    fi
+
+    rm -f "$installer"
+
+    # Pastikan binary benar-benar tersedia
+
+    if [[ ! -x /usr/local/bin/xray ]]; then
+        print_error "Binary Xray tidak ditemukan setelah instalasi"
+        return 1
+    fi
+
+    /usr/local/bin/xray version || {
+        print_error "Xray Core tidak dapat dijalankan"
+        return 1
+    }
+
+    print_success "Xray Core berhasil diunduh dan dipasang"
+
+    # ==========================================
+    # 4. DOWNLOAD KONFIGURASI XRAY
+    # ==========================================
+
+    print_install "Mengunduh konfigurasi Xray"
+
+    install -d -o root -g www-data -m 0750 \
+        /etc/xray /etc/haproxy /etc/nginx/conf.d
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Cfg/config.json" \
+        -o /etc/xray/config.json.tmp; then
+
+        rm -f /etc/xray/config.json.tmp
+        print_error "Gagal mengunduh config.json"
+        return 1
+    fi
+
+    if [[ ! -s /etc/xray/config.json.tmp ]]; then
+        rm -f /etc/xray/config.json.tmp
+        print_error "Config Xray kosong"
+        return 1
+    fi
+
+    mv /etc/xray/config.json.tmp /etc/xray/config.json
+
+    # Download service tambahan lama
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Fls/runn.service" \
+        -o /etc/systemd/system/runn.service; then
+
+        print_error "Gagal mengunduh runn.service"
+        return 1
+    fi
+
+    # ==========================================
+    # 5. MEMERIKSA DOMAIN DAN SSL
+    # ==========================================
+
+    domain=$(cat /etc/xray/domain 2>/dev/null)
+    IPVS=$(cat /etc/xray/ipvps 2>/dev/null)
+
+    if [[ -z "$domain" ]]; then
+        print_error "Domain Xray tidak ditemukan"
+        return 1
+    fi
+
+    if [[ ! -s /etc/xray/xray.crt ]]; then
+        print_error "Sertifikat xray.crt tidak ditemukan"
+        return 1
+    fi
+
+    if [[ ! -s /etc/xray/xray.key ]]; then
+        print_error "Private key xray.key tidak ditemukan"
+        return 1
+    fi
+
+    # Permission sertifikat untuk Xray
+
+    chown root:www-data /etc/xray/config.json
+    chmod 640 /etc/xray/config.json
+
+    chown root:www-data /etc/xray/xray.crt
+    chmod 644 /etc/xray/xray.crt
+
+    chown root:www-data /etc/xray/xray.key
+    chmod 640 /etc/xray/xray.key
+
+    # ==========================================
+    # 6. DOWNLOAD KONFIGURASI HAPROXY
+    # ==========================================
+
+    clear
+    print_install "Memasang konfigurasi HAProxy dan Nginx"
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Cfg/haproxy.cfg" \
+        -o /etc/haproxy/haproxy.cfg; then
+
+        print_error "Gagal mengunduh konfigurasi HAProxy"
+        return 1
+    fi
+
+    # ==========================================
+    # 7. DOWNLOAD KONFIGURASI NGINX
+    # ==========================================
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Cfg/xray.conf" \
+        -o /etc/nginx/conf.d/xray.conf; then
+
+        print_error "Gagal mengunduh konfigurasi Nginx Xray"
+        return 1
+    fi
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Cfg/nginx.conf" \
+        -o /etc/nginx/nginx.conf; then
+
+        print_error "Gagal mengunduh konfigurasi utama Nginx"
+        return 1
+    fi
+
+    # Mengganti domain konfigurasi
+
+    sed -i "s/xxx/${domain}/g" \
+        /etc/haproxy/haproxy.cfg
+
+    sed -i "s/xxx/${domain}/g" \
+        /etc/nginx/conf.d/xray.conf
+
+    # ==========================================
+    # 8. MEMBUAT SERTIFIKAT HAPROXY
+    # ==========================================
+
+    if ! cat /etc/xray/xray.crt /etc/xray/xray.key \
+        > /etc/haproxy/hap.pem; then
+
+        print_error "Gagal membuat sertifikat HAProxy"
+        return 1
+    fi
+
+    chown root:root /etc/haproxy/hap.pem
+    chmod 600 /etc/haproxy/hap.pem
+
+    # ==========================================
+    # 9. MEMBUAT SYSTEMD XRAY SERVICE
+    # ==========================================
+
+    print_install "Membuat service systemd Xray"
+
+    cat > /etc/systemd/system/xray.service <<'EOF'
 [Unit]
-Description=Xray Service
+Description=Xray Core Service
 Documentation=https://github.com/XTLS/Xray-core
 After=network-online.target nss-lookup.target
 Wants=network-online.target
 
 [Service]
+Type=simple
 User=www-data
 Group=www-data
+
 WorkingDirectory=/usr/local/bin
+
 RuntimeDirectory=xray
 RuntimeDirectoryMode=0755
+
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+
 NoNewPrivileges=true
+
 LimitNPROC=10000
 LimitNOFILE=1000000
+
 ExecStartPre=/usr/local/bin/xray run -test -config /etc/xray/config.json
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
+
 Restart=on-failure
+RestartSec=3
 RestartPreventExitStatus=23
+
 UMask=0007
 
 [Install]
 WantedBy=multi-user.target
 EOF
-if ! /usr/local/bin/xray run -test -config /etc/xray/config.json; then
-print_error "Konfigurasi Xray tidak valid; service tidak dijalankan"
-return 1
-fi
-if ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
-print_error "Konfigurasi HAProxy tidak valid; service tidak dijalankan"
-return 1
-fi
-if ! nginx -t; then
-print_error "Konfigurasi Nginx tidak valid; service tidak dijalankan"
-return 1
-fi
-systemctl daemon-reload
-systemctl enable --now xray haproxy nginx || {
-print_error "Gagal mengaktifkan service Xray/HAProxy/Nginx"
-return 1
-}
-for service_name in xray haproxy nginx; do
-if ! systemctl is-active --quiet "$service_name"; then
-print_error "Service ${service_name} belum aktif"
-systemctl status "$service_name" --no-pager -l
-return 1
-fi
-done
-print_success "Konfigurasi Packet"
+
+    chmod 644 /etc/systemd/system/xray.service
+
+    # ==========================================
+    # 10. VALIDASI KONFIGURASI XRAY
+    # ==========================================
+
+    print_install "Memeriksa validitas konfigurasi Xray"
+
+    if ! runuser -u www-data -- \
+        /usr/local/bin/xray run -test \
+        -config /etc/xray/config.json; then
+
+        print_error "Konfigurasi Xray tidak valid atau permission bermasalah"
+        return 1
+    fi
+
+    print_success "Konfigurasi Xray valid"
+
+    # ==========================================
+    # 11. VALIDASI HAPROXY
+    # ==========================================
+
+    print_install "Memeriksa konfigurasi HAProxy"
+
+    if ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
+        print_error "Konfigurasi HAProxy tidak valid"
+        return 1
+    fi
+
+    print_success "Konfigurasi HAProxy valid"
+
+    # ==========================================
+    # 12. VALIDASI NGINX
+    # ==========================================
+
+    print_install "Memeriksa konfigurasi Nginx"
+
+    if ! nginx -t; then
+        print_error "Konfigurasi Nginx tidak valid"
+        return 1
+    fi
+
+    print_success "Konfigurasi Nginx valid"
+
+    # ==========================================
+    # 13. AKTIFKAN SYSTEMD
+    # ==========================================
+
+    print_install "Mengaktifkan service Xray"
+
+    systemctl daemon-reload || {
+        print_error "Gagal menjalankan systemctl daemon-reload"
+        return 1
+    }
+
+    if ! systemctl enable xray haproxy nginx; then
+        print_error "Gagal mengaktifkan autostart service"
+        return 1
+    fi
+
+    if ! systemctl restart xray; then
+        print_error "Xray gagal dijalankan"
+        journalctl -u xray -n 40 --no-pager
+        return 1
+    fi
+
+    if ! systemctl restart haproxy; then
+        print_error "HAProxy gagal dijalankan"
+        journalctl -u haproxy -n 40 --no-pager
+        return 1
+    fi
+
+    if ! systemctl restart nginx; then
+        print_error "Nginx gagal dijalankan"
+        journalctl -u nginx -n 40 --no-pager
+        return 1
+    fi
+
+    # ==========================================
+    # 14. PEMERIKSAAN STATUS SERVICE
+    # ==========================================
+
+    print_install "Memeriksa status seluruh service"
+
+    for service_name in xray haproxy nginx; do
+
+        if ! systemctl is-active --quiet "$service_name"; then
+
+            print_error "Service $service_name belum aktif"
+
+            systemctl status "$service_name" \
+                --no-pager -l
+
+            journalctl -u "$service_name" \
+                -n 30 --no-pager
+
+            return 1
+        fi
+
+        print_success "Service $service_name aktif"
+    done
+
+    # ==========================================
+    # 15. SELESAI
+    # ==========================================
+
+    print_success "Xray Core berhasil diinstal dan berjalan"
+    print_success "HAProxy berhasil berjalan"
+    print_success "Nginx berhasil berjalan"
+
+    echo ""
+    echo "======================================"
+    echo " XRAY INSTALLATION COMPLETED"
+    echo "======================================"
+    echo "Domain : $domain"
+    echo "IP VPS : $IPVS"
+    echo "Xray   : RUNNING"
+    echo "HAProxy: RUNNING"
+    echo "Nginx  : RUNNING"
+    echo "======================================"
+
+    return 0
 }
 
 function ssh(){
