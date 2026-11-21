@@ -1,52 +1,46 @@
 #!/bin/bash
-# FIX-OVPN-V2 (penanda versi: dipakai installer untuk memastikan salinan GitHub tidak usang)
+# Mod By NEWBIE VPN 
+echo "✨ FILE ENC BY RIPZZSTORE"
+# By NEWBIE VPN 
+# ==================================================
+# Link Hosting Kalian
+REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/files/v4/"
+
+# initialisasi var
 export DEBIAN_FRONTEND=noninteractive
 OS=`uname -m`;
 MYIP=$(wget -qO- ipinfo.io/ip);
-domain=$(cat /root/domain)
-MYIP2="s/xxxxxxxxx/$domain/g";
-function ovpn_install() {
-rm -rf /etc/openvpn
-mkdir -p /etc/openvpn
-wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
-unzip -o -d /etc/openvpn/ /etc/openvpn/vpn.zip
-rm -f /etc/openvpn/vpn.zip
-# [FIX] jangan lanjut diam-diam bila vpn.zip gagal diunduh/diekstrak (openssl di bawah akan menulis ke folder yang salah)
-[ -s /etc/openvpn/server/server-tcp.conf ] && [ -s /etc/openvpn/server/server-udp.conf ] || { echo "vpn.zip gagal diunduh/diekstrak"; exit 1; }
-# Sertifikat server bawaan sudah kedaluwarsa (2023) dan vpn.zip TIDAK memuat ca.key maupun server.key.
-# [FIX] bila ca.key tidak ada, buat CA baru; lalu terbitkan sertifikat server baru yang ditandatangani CA tsb.
-cd /etc/openvpn/server || exit 1
-if [ ! -s ca.key ]; then
-openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3650 -sha256 -subj "/CN=ChangeMe" || exit 1
-fi
-openssl genrsa -out server.key 2048 || exit 1
-openssl req -new -key server.key -out server.csr -subj "/CN=server" || exit 1
-printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > server.ext
-openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650 -sha256 -extfile server.ext || exit 1
-chmod 600 ca.key server.key
-rm -f server.csr server.ext
+MYIP2="s/xxxxxxxxx/$MYIP/g";
+ANU=$(ip -o $ANU -4 route show to default | awk '{print $5}');
+
+# Install OpenVPN dan Easy-RSA
+apt install openvpn easy-rsa unzip -y
+apt install openssl iptables iptables-persistent -y
+mkdir -p /etc/openvpn/server/easy-rsa/
+cd /etc/openvpn/
+wget ${REPO}install/vpn.zip
+unzip vpn.zip
+rm -f vpn.zip
 chown -R root:root /etc/openvpn/server/easy-rsa/
-}
-function config_easy() {
+
 cd
 mkdir -p /usr/lib/openvpn/
-# [FIX] lokasi plugin PAM bisa berbeda antar distro/arsitektur
-PAMSO=$(find /usr/lib -name 'openvpn-plugin-auth-pam.so' 2>/dev/null | grep -v '^/usr/lib/openvpn/' | head -n 1)
-cp "$PAMSO" /usr/lib/openvpn/openvpn-plugin-auth-pam.so || exit 1
-# [FIX] OpenVPN >= 2.6: allow-compression default "no" menolak comp-lzo di config server
-OVPNV=$(openvpn --version 2>/dev/null | head -n1 | awk '{print $2}')
-if [[ "$OVPNV" =~ ^2\.([5-9]|[1-9][0-9])\. || "$OVPNV" =~ ^[3-9]\. ]]; then
-for f in server-tcp.conf server-udp.conf; do grep -q '^allow-compression' /etc/openvpn/server/$f || echo 'allow-compression yes' >> /etc/openvpn/server/$f; done
-fi
-systemctl reset-failed 'openvpn-server@*' >/dev/null 2>&1
+cp /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so /usr/lib/openvpn/openvpn-plugin-auth-pam.so
+
+# nano /etc/default/openvpn
 sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
+
+# restart openvpn dan cek status openvpn
 systemctl enable --now openvpn-server@server-tcp
 systemctl enable --now openvpn-server@server-udp
 /etc/init.d/openvpn restart
-}
-function make_follow() {
+/etc/init.d/openvpn status
+
+# aktifkan ip4 forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
+
+# Buat config client TCP 1194
 cat > /etc/openvpn/tcp.ovpn <<-END
 client
 dev tun
@@ -61,7 +55,10 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+
 sed -i $MYIP2 /etc/openvpn/tcp.ovpn;
+
+# Buat config client UDP 2200
 cat > /etc/openvpn/udp.ovpn <<-END
 client
 dev tun
@@ -76,27 +73,15 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+
 sed -i $MYIP2 /etc/openvpn/udp.ovpn;
-cat > /etc/openvpn/ws-ssl.ovpn <<-END
-client
-dev tun
-proto tcp
-remote xxxxxxxxx 443
-resolv-retry infinite
-route-method exe
-nobind
-persist-key
-persist-tun
-auth-user-pass
-comp-lzo
-verb 3
-END
-sed -i $MYIP2 /etc/openvpn/ws-ssl.ovpn;
+
+# Buat config client SSL
 cat > /etc/openvpn/ssl.ovpn <<-END
 client
 dev tun
 proto tcp
-remote xxxxxxxxx 443
+remote xxxxxxxxx 990
 resolv-retry infinite
 route-method exe
 nobind
@@ -106,47 +91,39 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+
 sed -i $MYIP2 /etc/openvpn/ssl.ovpn;
-}
-function cert_ovpn() {
+
+cd
+# pada tulisan xxx ganti dengan alamat ip address VPS anda
+/etc/init.d/openvpn restart
+
+# masukkan certificatenya ke dalam config client TCP 1194
 echo '<ca>' >> /etc/openvpn/tcp.ovpn
 cat /etc/openvpn/server/ca.crt >> /etc/openvpn/tcp.ovpn
 echo '</ca>' >> /etc/openvpn/tcp.ovpn
-cp /etc/openvpn/tcp.ovpn /var/www/html/tcp.ovpn
+
+# Copy config OpenVPN client ke home directory root agar mudah didownload ( TCP 1194 )
+cp /etc/openvpn/tcp.ovpn /home/vps/public_html/tcp.ovpn
+
+# masukkan certificatenya ke dalam config client UDP 2200
 echo '<ca>' >> /etc/openvpn/udp.ovpn
 cat /etc/openvpn/server/ca.crt >> /etc/openvpn/udp.ovpn
 echo '</ca>' >> /etc/openvpn/udp.ovpn
-cp /etc/openvpn/udp.ovpn /var/www/html/udp.ovpn
-echo '<ca>' >> /etc/openvpn/ws-ssl.ovpn
-cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ws-ssl.ovpn
-echo '</ca>' >> /etc/openvpn/ws-ssl.ovpn
-cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
+
+# Copy config OpenVPN client ke home directory root agar mudah didownload ( UDP 2200 )
+cp /etc/openvpn/udp.ovpn /home/vps/public_html/udp.ovpn
+
+# masukkan certificatenya ke dalam config client SSL
+echo '<ca>' >> /etc/openvpn/ssl.ovpn
+cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ssl.ovpn
 echo '</ca>' >> /etc/openvpn/ssl.ovpn
-cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ssl.ovpn
-cd /var/www/html/
-zip Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn > /dev/null 2>&1
-cd
-cat <<'mySiteOvpn' > /var/www/html/index.html
-<!DOCTYPE html>
-<html lang="en">
-<!-- Simple OVPN Download site -->
-<head><meta charset="utf-8"><title>OpenVPN Config Download</title></head>
-<body>
-<h2>OpenVPN Config Download</h2>
-<ul>
-<li><a href="tcp.ovpn">OpenVPN TCP</a></li>
-<li><a href="udp.ovpn">OpenVPN UDP</a></li>
-<li><a href="ssl.ovpn">OpenVPN SSL</a></li>
-<li><a href="ws-ssl.ovpn">OpenVPN WS-SSL</a></li>
-<li><a href="Kyt-Project.zip">Semua config (zip)</a></li>
-</ul>
-</body>
-</html>
-mySiteOvpn
+
+# Copy config OpenVPN client ke home directory root agar mudah didownload ( SSL )
+cp /etc/openvpn/ssl.ovpn /home/vps/public_html/ssl.ovpn
 
 #firewall untuk memperbolehkan akses UDP dan akses jalur TCP
-# [FIX] $ANU tidak pernah didefinisikan -> aturan MASQUERADE gagal
-ANU=$(ip -o -4 route show to default | awk '{print $5}' | head -n 1)
+
 iptables -t nat -I POSTROUTING -s 10.6.0.0/24 -o $ANU -j MASQUERADE
 iptables -t nat -I POSTROUTING -s 10.7.0.0/24 -o $ANU -j MASQUERADE
 iptables-save > /etc/iptables.up.rules
@@ -164,10 +141,3 @@ systemctl start openvpn
 # Delete script
 history -c
 rm -f /root/vpn.sh
-}
-# [FIX] file asli terpotong dan tidak memanggil satu pun fungsi di atas
-ovpn_install
-config_easy
-make_follow
-cert_ovpn
-[ -s /etc/openvpn/server/server.crt ] && [ -s /etc/openvpn/server/server.key ] && [ -s /etc/openvpn/server/ca.crt ] || exit 1
