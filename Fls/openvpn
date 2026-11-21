@@ -4,7 +4,7 @@ echo "✨ FILE ENC BY RIPZZSTORE"
 # By NEWBIE VPN 
 # ==================================================
 # Link Hosting Kalian
-REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/files/v4/"
+REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/"
 
 # initialisasi var
 export DEBIAN_FRONTEND=noninteractive
