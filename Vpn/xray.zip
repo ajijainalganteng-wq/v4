@@ -1,4 +1,5 @@
 #!/bin/bash
+export DEBIAN_FRONTEND=noninteractive
 Green="\e[92;1m"
 RED="\033[1;31m"
 YELLOW="\033[33m"
@@ -15,7 +16,7 @@ green='\e[0;32m'
 TIME=$(date '+%d %b %Y')
 TIMES="10"
 CHATID="7325977028"
-KEY="80826138:AAGSWatgSRP5JuqWo2tOVmlWZx_0UUz5mu0"
+KEY="8980826138:AAGSWatgSRP5JuqWo2tOVmlWZx_0UUz5mu0"
 URL="https://api.telegram.org/bot$KEY/sendMessage"
 function print_ok() {
 echo -e "${OK} ${BLUE} $1 ${FONT}"
@@ -36,7 +37,7 @@ echo -e "${Green} # $1 berhasil dipasang"
 echo -e "${green} =============================== ${FONT}"
 sleep 2
 fi
-}      
+}            
 clear
     function check_os_version() {
     local os_id os_version
