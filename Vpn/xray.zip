@@ -925,88 +925,290 @@ systemctl restart ssh
 print_success "SSHD"
 }
 clear
-function ins_dropbear(){
-clear
-local dropbear_version="2026.94"
-local build_dir="/usr/local/src/dropbear-${dropbear_version}"
-local archive="/tmp/dropbear-${dropbear_version}.tar.bz2"
-print_install "Menginstall Dropbear versi ${dropbear_version}"
-apt-get install -y --no-install-recommends dropbear build-essential zlib1g-dev libpam0g-dev ca-certificates curl bzip2 || {
-print_error "Gagal memasang dependensi Dropbear"
-return 1
-}
-systemctl stop dropbear >/dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf" || {
-print_error "Gagal mengambil konfigurasi Dropbear dari repository"
-return 1
-}
-wget -q -O /etc/banner.txt "${REPO}banner.txt" || touch /etc/banner.txt
-chmod 644 /etc/default/dropbear /etc/banner.txt
-mkdir -p /usr/local/src
-rm -rf "$build_dir"
-curl -fL --retry 3 --retry-delay 2 "https://matt.ucc.asn.au/dropbear/releases/dropbear-${dropbear_version}.tar.bz2" -o "$archive" || {
-print_error "Gagal mengunduh source Dropbear"
-return 1
-}
-tar -xjf "$archive" -C /usr/local/src || {
-print_error "Gagal mengekstrak source Dropbear"
-return 1
-}
-cd "$build_dir" || return 1
-./configure --prefix=/usr --sysconfdir=/etc/dropbear --enable-pam || {
-print_error "Konfigurasi build Dropbear gagal"
-cd
-return 1
-}
-make -j"$(nproc)" PROGRAMS="dropbear dropbearkey" || {
-print_error "Build Dropbear gagal"
-cd
-return 1
-}
-cp -a /usr/sbin/dropbear /usr/sbin/dropbear.ubuntu.bak >/dev/null 2>&1 || true
-make PROGRAMS="dropbear dropbearkey" install || {
-print_error "Instalasi binary Dropbear gagal"
-cd
-return 1
-}
-cd
-rm -rf "$build_dir" "$archive"
-systemctl daemon-reload
-systemctl enable --now dropbear || {
-print_error "Service Dropbear gagal dijalankan"
-systemctl status dropbear --no-pager -l
-return 1
-}
-if ! systemctl is-active --quiet dropbear; then
-print_error "Dropbear belum aktif"
-systemctl status dropbear --no-pager -l
-return 1
-fi
-dropbear -V 2>&1 | head -n 1
-print_success "Dropbear ${dropbear_version}"
-}
 
-clear
-function ins_vnstat(){
-clear
-print_install "Menginstall Vnstat"
-apt -y install vnstat > /dev/null 2>&1
-/etc/init.d/vnstat restart
-apt -y install libsqlite3-dev > /dev/null 2>&1
-wget https://humdi.net/vnstat/vnstat-2.6.tar.gz
-tar zxvf vnstat-2.6.tar.gz
-cd vnstat-2.6
-./configure --prefix=/usr --sysconfdir=/etc && make && make install
-cd
-vnstat -u -i $NET
-sed -i 's/Interface "'""eth0""'"/Interface "'""$NET""'"/g' /etc/vnstat.conf
-chown vnstat:vnstat /var/lib/vnstat -R
-systemctl enable vnstat
-/etc/init.d/vnstat restart
-/etc/init.d/vnstat status
-rm -f /root/vnstat-2.6.tar.gz
-rm -rf /root/vnstat-2.6
-print_success "Vnstat"
+function ins_dropbear(){
+    clear
+
+    local dropbear_version="2026.94"
+    local build_dir="/usr/local/src/dropbear-${dropbear_version}"
+    local archive="/tmp/dropbear-${dropbear_version}.tar.bz2"
+    local repo="${REPO%/}/"
+    local temp_config
+    local temp_banner
+
+    print_install "Menginstall Dropbear versi ${dropbear_version}"
+
+    # ==========================================
+    # 1. PEMERIKSAAN AWAL
+    # ==========================================
+
+    if [[ $EUID -ne 0 ]]; then
+        print_error "Jalankan instalasi sebagai root"
+        return 1
+    fi
+
+    if [[ -z "${REPO:-}" ]]; then
+        print_error "Variabel REPO belum dikonfigurasi"
+        return 1
+    fi
+
+    # ==========================================
+    # 2. INSTALL DEPENDENCIES
+    # ==========================================
+
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update || {
+        print_error "Gagal memperbarui APT"
+        return 1
+    }
+
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        zlib1g-dev \
+        libpam0g-dev \
+        ca-certificates \
+        curl \
+        bzip2 \
+        make \
+        gcc \
+        perl \
+        libcrypt-dev || {
+        print_error "Gagal memasang dependensi Dropbear"
+        return 1
+    }
+
+    # ==========================================
+    # 3. DOWNLOAD KONFIGURASI DROPBEAR
+    # ==========================================
+
+    print_install "Mengunduh konfigurasi Dropbear dari GitHub"
+
+    temp_config=$(mktemp /tmp/dropbear-config.XXXXXX) || return 1
+    temp_banner=$(mktemp /tmp/dropbear-banner.XXXXXX) || {
+        rm -f "$temp_config"
+        return 1
+    }
+
+    # Nama file repository adalah dropbear,
+    # bukan dropbear.conf
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}Cfg/dropbear" -o "$temp_config"; then
+
+        rm -f "$temp_config" "$temp_banner"
+        print_error "Gagal mengunduh Cfg/dropbear"
+        return 1
+    fi
+
+    if [[ ! -s "$temp_config" ]] ||
+       head -c 2048 "$temp_config" | grep -Eiq '<!DOCTYPE html|<html|404: Not Found'; then
+
+        rm -f "$temp_config" "$temp_banner"
+        print_error "File konfigurasi Dropbear tidak valid"
+        return 1
+    fi
+
+    if ! curl -fLsS --retry 3 \
+        "${repo}banner.txt" -o "$temp_banner"; then
+
+        rm -f "$temp_config" "$temp_banner"
+        print_error "Gagal mengunduh banner.txt"
+        return 1
+    fi
+
+    install -D -m 0644 "$temp_config" /etc/default/dropbear
+    install -m 0644 "$temp_banner" /etc/banner.txt
+
+    rm -f "$temp_config" "$temp_banner"
+
+    print_success "Konfigurasi Dropbear berhasil diunduh"
+
+    # ==========================================
+    # 4. STOP SERVICE LAMA
+    # ==========================================
+
+    print_install "Menghentikan service Dropbear lama"
+
+    systemctl stop dropbear >/dev/null 2>&1 || true
+
+    # ==========================================
+    # 5. DOWNLOAD SOURCE DROPBEAR
+    # ==========================================
+
+    print_install "Mengunduh source Dropbear ${dropbear_version}"
+
+    mkdir -p /usr/local/src
+
+    rm -rf "$build_dir"
+    rm -f "$archive"
+
+    if ! curl -fLsS --retry 3 --retry-delay 2 \
+        "https://matt.ucc.asn.au/dropbear/releases/dropbear-${dropbear_version}.tar.bz2" \
+        -o "$archive"; then
+
+        print_error "Gagal mengunduh source Dropbear"
+        return 1
+    fi
+
+    if [[ ! -s "$archive" ]] || ! tar -tjf "$archive" >/dev/null 2>&1; then
+        rm -f "$archive"
+        print_error "Arsip Dropbear rusak atau tidak valid"
+        return 1
+    fi
+
+    # ==========================================
+    # 6. EXTRACT SOURCE
+    # ==========================================
+
+    if ! tar -xjf "$archive" -C /usr/local/src; then
+        print_error "Gagal mengekstrak source Dropbear"
+        return 1
+    fi
+
+    if [[ ! -d "$build_dir" ]]; then
+        print_error "Direktori source Dropbear tidak ditemukan"
+        return 1
+    fi
+
+    cd "$build_dir" || {
+        print_error "Gagal masuk direktori source"
+        return 1
+    }
+
+    # ==========================================
+    # 7. CONFIGURE DROPBEAR
+    # ==========================================
+
+    print_install "Mengonfigurasi source Dropbear"
+
+    if ! ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc/dropbear \
+        --enable-pam; then
+
+        cd /root
+        print_error "Konfigurasi build Dropbear gagal"
+        return 1
+    fi
+
+    # ==========================================
+    # 8. BUILD DROPBEAR
+    # ==========================================
+
+    print_install "Mengompilasi Dropbear"
+
+    if ! make -j"$(nproc)" PROGRAMS="dropbear dropbearkey"; then
+        cd /root
+        print_error "Build Dropbear gagal"
+        return 1
+    fi
+
+    # Pastikan binary hasil kompilasi tersedia
+
+    if [[ ! -x ./dropbear ]] || [[ ! -x ./dropbearkey ]]; then
+        cd /root
+        print_error "Binary hasil build tidak ditemukan"
+        return 1
+    fi
+
+    # ==========================================
+    # 9. BACKUP BINARY LAMA
+    # ==========================================
+
+    print_install "Mencadangkan binary Dropbear lama"
+
+    if [[ -x /usr/sbin/dropbear ]]; then
+        cp -a /usr/sbin/dropbear \
+            /usr/sbin/dropbear.ubuntu.bak || {
+            cd /root
+            print_error "Gagal mencadangkan binary lama"
+            return 1
+        }
+    fi
+
+    # ==========================================
+    # 10. INSTALL DROPBEAR
+    # ==========================================
+
+    print_install "Memasang Dropbear versi ${dropbear_version}"
+
+    if ! make PROGRAMS="dropbear dropbearkey" install; then
+        cd /root
+        print_error "Instalasi binary Dropbear gagal"
+        return 1
+    fi
+
+    cd /root
+
+    # ==========================================
+    # 11. VALIDASI BINARY
+    # ==========================================
+
+    if [[ ! -x /usr/sbin/dropbear ]]; then
+        print_error "Binary /usr/sbin/dropbear tidak ditemukan"
+        return 1
+    fi
+
+    if [[ ! -x /usr/bin/dropbearkey ]]; then
+        print_error "Binary dropbearkey tidak ditemukan"
+        return 1
+    fi
+
+    # ==========================================
+    # 12. RELOAD SYSTEMD
+    # ==========================================
+
+    systemctl daemon-reload || {
+        print_error "Gagal reload systemd"
+        return 1
+    }
+
+    # ==========================================
+    # 13. AKTIFKAN DROPBEAR
+    # ==========================================
+
+    print_install "Mengaktifkan service Dropbear"
+
+    if ! systemctl enable dropbear; then
+        print_error "Gagal mengaktifkan autostart Dropbear"
+        return 1
+    fi
+
+    if ! systemctl restart dropbear; then
+        print_error "Dropbear gagal dijalankan"
+
+        systemctl status dropbear --no-pager -l
+        journalctl -u dropbear -n 40 --no-pager
+
+        return 1
+    fi
+
+    # ==========================================
+    # 14. CEK STATUS
+    # ==========================================
+
+    if ! systemctl is-active --quiet dropbear; then
+        print_error "Service Dropbear belum aktif"
+
+        systemctl status dropbear --no-pager -l
+        journalctl -u dropbear -n 40 --no-pager
+
+        return 1
+    fi
+
+    # ==========================================
+    # 15. CLEANUP
+    # ==========================================
+
+    rm -rf "$build_dir"
+    rm -f "$archive"
+
+    dropbear -V 2>&1 | head -n 1
+
+    print_success "Dropbear ${dropbear_version} berhasil diinstal dan berjalan"
+
+    return 0
 }
 
 function ins_openvpn() {
