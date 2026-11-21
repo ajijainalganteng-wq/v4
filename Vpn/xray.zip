@@ -356,70 +356,24 @@ auto_system() {
 clear
 function pasang_ssl() {
 # ==============================
-# 6️⃣ Generate domain (ditanam langsung)
+# 6️⃣ Input Domain Manual
 # ==============================
-echo -e "\e[1;32mPlease Wait While We Generate Your Domain\e[0m"
-
-CF_ID="ajijainalganteng@gmail.com"
-CF_KEY="cfk_ZVBC9kEehWaK7jShVSqrBzvGidktF41BvKPxusM4a0895611"
-CF_DOMAIN="satsetvpn.web.id"
-SUB="test$((RANDOM % 10 + 1))"
-CF_IP=$(cat /usr/bin/ipsave)
-
-echo "🔎 Memproses subdomain: ${SUB}.${CF_DOMAIN}"
-echo "🌐 IP publik: ${CF_IP}"
-
-# Ambil Zone ID
-ZONE="$(curl -sLX GET "https://api.cloudflare.com/client/v4/zones?name=${CF_DOMAIN}&status=active" \
-  -H "X-Auth-Email: ${CF_ID}" \
-  -H "X-Auth-Key: ${CF_KEY}" \
-  -H "Content-Type: application/json" | jq -r '.result[0].id')"
-
-if [[ -z "${ZONE}" || "${ZONE}" == "null" ]]; then
-  echo "❌ Zone ID tidak ditemukan!"
-  exit 1
-fi
-
-# Cek apakah record sudah ada
-RECORD="$(curl -sLX GET "https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records?type=A&name=${SUB}.${CF_DOMAIN}" \
-  -H "X-Auth-Email: ${CF_ID}" \
-  -H "X-Auth-Key: ${CF_KEY}" \
-  -H "Content-Type: application/json" | jq -r '.result[0].id')"
-
-# Hapus jika ada
-if [[ -n "${RECORD}" && "${RECORD}" != "null" ]]; then
-  echo "♻️ Menghapus DNS lama (${SUB}.${CF_DOMAIN})..."
-  curl -sLX DELETE "https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records/${RECORD}" \
-    -H "X-Auth-Email: ${CF_ID}" \
-    -H "X-Auth-Key: ${CF_KEY}" \
-    -H "Content-Type: application/json" >/dev/null
-fi
-
-# Buat DNS baru
-echo "➕ Membuat DNS baru..."
-NEW="$(curl -sLX POST "https://api.cloudflare.com/client/v4/zones/${ZONE}/dns_records" \
-  -H "X-Auth-Email: ${CF_ID}" \
-  -H "X-Auth-Key: ${CF_KEY}" \
-  -H "Content-Type: application/json" \
-  --data "{\"type\":\"A\",\"name\":\"${SUB}.${CF_DOMAIN}\",\"content\":\"${CF_IP}\",\"ttl\":120,\"proxied\":false}")"
-
-if [[ "$(echo "${NEW}" | jq -r '.success')" == "true" ]]; then
-  echo "✔️ Berhasil: ${SUB}.${CF_DOMAIN} → ${CF_IP}"
-else
-  echo "❌ Gagal membuat DNS!"
-  echo "${NEW}" | jq .
-  exit 1
-fi
-
-# Simpan domain
-mkdir -p /etc/xray
-mkdir -p /var/lib/kyt
-echo "${SUB}.${CF_DOMAIN}" > /etc/xray/domain
-echo "${SUB}.${CF_DOMAIN}" > /root/domain
-echo "IP=${SUB}.${CF_DOMAIN}" > /var/lib/kyt/ipvps.conf
-echo "🎉 Subdomain aktif: ${SUB}.${CF_DOMAIN}"
-
-sleep 2
+while true; do
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    read -rp "Masukkan Domain VPS: " DOMAIN
+    echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [[ -n "$DOMAIN" ]]; then
+        echo "$DOMAIN" > /root/domain
+        mkdir -p /etc/xray
+        echo "$DOMAIN" > /etc/xray/domain
+        echo ""
+        echo "Domain berhasil disimpan: $DOMAIN"
+        sleep 2
+        break
+    else
+        echo "Domain tidak boleh kosong, silakan masukkan kembali."
+    fi
+done
 clear
 print_install "Memasang SSL Pada Domain"
 rm -rf /etc/xray/xray.key
@@ -436,7 +390,7 @@ chmod +x /root/.acme.sh/acme.sh
 /root/.acme.sh/acme.sh --set-default-ca --server letsencrypt
 /root/.acme.sh/acme.sh --issue -d $domain --standalone -k ec-256
 ~/.acme.sh/acme.sh --installcert -d $domain --fullchainpath /etc/xray/xray.crt --keypath /etc/xray/xray.key --ecc
-chmod 600 /etc/xray/xray.key
+chmod 777 /etc/xray/xray.key
 print_success "SSL Certificate"
 }
 function make_folder_xray() {
