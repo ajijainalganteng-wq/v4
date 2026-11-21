@@ -193,160 +193,115 @@ export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
 
-function install_haproxy_34() {
-    local haproxy_version="3.4.7"
-    local build_dir="/usr/local/src/haproxy-${haproxy_version}"
-    local archive="/tmp/haproxy-${haproxy_version}.tar.gz"
-    local source_url="https://www.haproxy.org/download/3.4/src/haproxy-${haproxy_version}.tar.gz"
-    local config="/etc/haproxy/haproxy.cfg"
-    local binary="/usr/sbin/haproxy"
-    local backup="/usr/sbin/haproxy.ubuntu.bak"
-    local temp_binary="/usr/sbin/haproxy.new"
+function first_setup() {
+    print_install "Setup Dependencies dan HAProxy terbaru"
 
-    print_install "Menginstall HAProxy ${haproxy_version} LTS dan memeriksa integrasi service"
+    # Pastikan dijalankan sebagai root
+    if [ "$(id -u)" -ne 0 ]; then
+        print_error "Jalankan script sebagai root!"
+        return 1
+    fi
 
-    # 1. Install dependency
-    apt-get update || return 1
+    # Atur timezone
+    timedatectl set-timezone Asia/Jakarta || {
+        print_error "Gagal mengatur timezone"
+        return 1
+    }
+
+    # Konfigurasi iptables-persistent
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+
+    # Baca informasi OS
+    . /etc/os-release
+
+    echo "Detected OS: ${PRETTY_NAME}"
+
+    # Dependency dasar
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update || {
+        print_error "Gagal melakukan apt update"
+        return 1
+    }
 
     apt-get install -y --no-install-recommends \
-        build-essential libssl-dev libpcre2-dev zlib1g-dev \
-        libsystemd-dev ca-certificates curl tar || {
-        print_error "Gagal memasang dependency HAProxy"
+        ca-certificates curl gnupg software-properties-common \
+        lsb-release apt-transport-https iptables-persistent || {
+        print_error "Gagal memasang dependency"
         return 1
     }
 
-    # 2. Backup binary lama
-    systemctl stop haproxy >/dev/null 2>&1 || true
+    # Ubuntu 20.04+
+    if [ "$ID" = "ubuntu" ]; then
 
-    if [ -x "$binary" ] && [ ! -f "$backup" ]; then
-        cp -a "$binary" "$backup" || return 1
-    fi
+        local ubuntu_major
+        ubuntu_major=$(echo "$VERSION_ID" | cut -d. -f1)
 
-    # 3. Download source
-    mkdir -p /usr/local/src
-    rm -rf "$build_dir"
-    rm -f "$archive"
+        if [ "$ubuntu_major" -lt 20 ]; then
+            print_error "Ubuntu minimal versi 20.04"
+            return 1
+        fi
 
-    curl -fL --retry 3 --retry-delay 2 \
-        "$source_url" -o "$archive" || {
-        print_error "Gagal mengunduh HAProxy ${haproxy_version}"
-        return 1
-    }
+        print_install "Menambahkan repository HAProxy 3.2 LTS"
 
-    # 4. Validasi archive
-    tar -tzf "$archive" >/dev/null 2>&1 || {
-        print_error "Archive HAProxy tidak valid"
-        rm -f "$archive"
-        return 1
-    }
+        add-apt-repository -y ppa:vbernat/haproxy-3.2 || {
+            print_error "Gagal menambahkan repository HAProxy"
+            return 1
+        }
 
-    tar -xzf "$archive" -C /usr/local/src || {
-        print_error "Gagal mengekstrak source HAProxy"
-        return 1
-    }
+        apt-get update || {
+            print_error "Gagal memperbarui repository HAProxy"
+            return 1
+        }
 
-    [ -f "$build_dir/Makefile" ] || {
-        print_error "Source HAProxy tidak ditemukan"
-        return 1
-    }
+        apt-get install -y --no-install-recommends haproxy || {
+            print_error "Gagal menginstall HAProxy"
+            return 1
+        }
 
-    # 5. Compile HAProxy
-    make -C "$build_dir" clean >/dev/null 2>&1 || true
+    # Debian
+    elif [ "$ID" = "debian" ]; then
 
-    make -C "$build_dir" -j"$(nproc)" \
-        TARGET=linux-glibc \
-        USE_OPENSSL=1 \
-        USE_PCRE2=1 \
-        USE_ZLIB=1 \
-        USE_SYSTEMD=1 || {
-        print_error "Build HAProxy gagal"
-        return 1
-    }
+        print_install "Menginstall HAProxy dari repository Debian"
 
-    [ -x "$build_dir/haproxy" ] || {
-        print_error "Binary hasil build tidak ditemukan"
-        return 1
-    }
+        apt-get install -y --no-install-recommends haproxy || {
+            print_error "Gagal menginstall HAProxy Debian"
+            return 1
+        }
 
-    "$build_dir/haproxy" -v | grep -q "$haproxy_version" || {
-        print_error "Versi binary hasil build tidak sesuai"
-        return 1
-    }
-
-    # 6. Pasang binary sementara
-    install -m 0755 "$build_dir/haproxy" "$temp_binary" || return 1
-
-    "$temp_binary" -v >/dev/null 2>&1 || {
-        print_error "Binary HAProxy baru tidak dapat dijalankan"
-        rm -f "$temp_binary"
-        return 1
-    }
-
-    mv -f "$temp_binary" "$binary" || return 1
-
-    # 7. Periksa konfigurasi HAProxy
-    if [ ! -s "$config" ]; then
-        print_error "File konfigurasi $config tidak ditemukan atau kosong"
-        [ -f "$backup" ] && cp -a "$backup" "$binary"
+    else
+        print_error "OS tidak didukung: ${PRETTY_NAME}"
         return 1
     fi
 
-    "$binary" -c -f "$config" || {
-        print_error "Konfigurasi HAProxy tidak valid"
-        [ -f "$backup" ] && cp -a "$backup" "$binary"
+    # Validasi binary
+    if ! command -v haproxy >/dev/null 2>&1; then
+        print_error "Binary HAProxy tidak ditemukan"
         return 1
-    }
+    fi
 
-    # 8. Periksa systemd
+    # Validasi versi
+    local haproxy_version
+    haproxy_version=$(haproxy -v 2>/dev/null | head -n 1)
+
+    if [ -z "$haproxy_version" ]; then
+        print_error "HAProxy gagal dijalankan"
+        return 1
+    fi
+
+    # Aktifkan service tanpa memaksa restart
     systemctl daemon-reload
-
     systemctl enable haproxy >/dev/null 2>&1 || {
         print_error "Gagal mengaktifkan service HAProxy"
         return 1
     }
 
-    # 9. Jalankan HAProxy
-    systemctl restart haproxy || {
-        print_error "HAProxy gagal dijalankan"
-        journalctl -u haproxy -n 40 --no-pager
-        return 1
-    }
+    print_success "HAProxy berhasil diinstall"
+    echo "OS      : ${PRETTY_NAME}"
+    echo "Version : ${haproxy_version}"
 
-    sleep 2
-
-    if ! systemctl is-active --quiet haproxy; then
-        print_error "Service HAProxy tidak aktif"
-        journalctl -u haproxy -n 40 --no-pager
-        return 1
-    fi
-
-    # 10. Verifikasi versi aktif
-    local active_version
-    active_version=$("$binary" -v | head -n 1)
-
-    rm -rf "$build_dir" "$archive"
-
-    print_success "HAProxy ${haproxy_version} berhasil dipasang"
-    echo "Versi aktif: $active_version"
-    echo "Service: $(systemctl is-active haproxy)"
     return 0
-}
-
-function first_setup(){
-timedatectl set-timezone Asia/Jakarta
-echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-print_success "Directory Xray"
-local os_id
-os_id=$( . /etc/os-release && printf '%s' "$ID" )
-if [[ "$os_id" == "ubuntu" || "$os_id" == "debian" ]]; then
-echo "Setup Dependencies $(. /etc/os-release && printf '%s' "$PRETTY_NAME")"
-apt-get update -y
-install_haproxy_34 || return 1
-else
-echo -e " Your OS Is Not Supported ($( . /etc/os-release && printf '%s' "$PRETTY_NAME") )"
-return 1
-fi
 }
 clear
 function nginx_install() {
