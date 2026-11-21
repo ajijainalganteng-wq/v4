@@ -1,576 +1,136 @@
 #!/bin/bash
-
-# ==============================================
-# FIX-OVPN-V3
-# OpenVPN TCP / UDP / SSL / WS-SSL
-# ==============================================
-
+# FIX-OVPN-V2 (penanda versi: dipakai installer untuk memastikan salinan GitHub tidak usang)
 export DEBIAN_FRONTEND=noninteractive
-
-OS="$(uname -m)"
-MYIP="$(curl -4fsS --max-time 10 https://ipinfo.io/ip 2>/dev/null)"
-domain="$(cat /root/domain 2>/dev/null | tr -d '[:space:]')"
-
-OVPN_DIR="/etc/openvpn"
-SERVER_DIR="/etc/openvpn/server"
-WEB_DIR="/var/www/html"
-
-# ==============================================
-# 1. INSTALL OPENVPN
-# ==============================================
-
+OS=`uname -m`;
+MYIP=$(wget -qO- ipinfo.io/ip);
+domain=$(cat /root/domain)
+MYIP2="s/xxxxxxxxx/$domain/g";
 function ovpn_install() {
-
-    print_install "Menginstall dan menyiapkan OpenVPN"
-
-    if [[ $EUID -ne 0 ]]; then
-        echo "Jalankan script sebagai root"
-        return 1
-    fi
-
-    if [[ -z "$domain" ]]; then
-        print_error "Domain /root/domain tidak ditemukan"
-        return 1
-    fi
-
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
-        print_error "Format domain tidak valid"
-        return 1
-    fi
-
-    apt-get update || {
-        print_error "Gagal memperbarui APT"
-        return 1
-    }
-
-    apt-get install -y \
-        openvpn \
-        easy-rsa \
-        unzip \
-        openssl \
-        curl \
-        ca-certificates \
-        iptables \
-        iptables-persistent \
-        netfilter-persistent || {
-        print_error "Gagal memasang dependensi OpenVPN"
-        return 1
-    }
-
-    # ------------------------------------------
-    # BACKUP KONFIGURASI LAMA
-    # ------------------------------------------
-
-    if [[ -d "$OVPN_DIR" ]]; then
-
-        local backup="/root/openvpn-backup-$(date +%Y%m%d_%H%M%S)"
-
-        mkdir -p "$backup"
-
-        cp -a "$OVPN_DIR"/. "$backup"/ || {
-            print_error "Gagal membackup konfigurasi OpenVPN"
-            return 1
-        }
-
-        print_success "Backup OpenVPN: $backup"
-    fi
-
-    # ------------------------------------------
-    # DOWNLOAD VPN.ZIP
-    # ------------------------------------------
-
-    print_install "Mengunduh konfigurasi VPN dari GitHub"
-
-    local temp_dir
-    temp_dir="$(mktemp -d /tmp/openvpn.XXXXXX)" || return 1
-
-    if ! curl -fLsS \
-        --connect-timeout 20 \
-        --max-time 300 \
-        --retry 3 \
-        --retry-delay 3 \
-        "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" \
-        -o "$temp_dir/vpn.zip"; then
-
-        rm -rf "$temp_dir"
-
-        print_error "Gagal mengunduh vpn.zip dari GitHub"
-        return 1
-    fi
-
-    if [[ ! -s "$temp_dir/vpn.zip" ]] ||
-       ! unzip -tq "$temp_dir/vpn.zip" >/dev/null 2>&1; then
-
-        rm -rf "$temp_dir"
-
-        print_error "File vpn.zip rusak atau tidak valid"
-        return 1
-    fi
-
-    # ------------------------------------------
-    # EXTRACT VPN.ZIP
-    # ------------------------------------------
-
-    print_install "Mengekstrak konfigurasi OpenVPN"
-
-    mkdir -p "$OVPN_DIR" "$SERVER_DIR"
-
-    if ! unzip -oq "$temp_dir/vpn.zip" -d "$temp_dir/extracted"; then
-
-        rm -rf "$temp_dir"
-
-        print_error "Gagal mengekstrak vpn.zip"
-        return 1
-    fi
-
-    local tcp_file
-    local udp_file
-    local source_server
-
-    tcp_file="$(find "$temp_dir/extracted" -type f -name server-tcp.conf -print -quit)"
-    udp_file="$(find "$temp_dir/extracted" -type f -name server-udp.conf -print -quit)"
-
-    if [[ -z "$tcp_file" || -z "$udp_file" ]]; then
-
-        rm -rf "$temp_dir"
-
-        print_error "server-tcp.conf atau server-udp.conf tidak ditemukan dalam ZIP"
-        return 1
-    fi
-
-    source_server="$(dirname "$tcp_file")"
-
-    # Salin file konfigurasi server
-
-    cp -a "$source_server"/. "$SERVER_DIR"/ || {
-        rm -rf "$temp_dir"
-        print_error "Gagal memasang konfigurasi server"
-        return 1
-    }
-
-    # Salin file tambahan dari ZIP, termasuk Easy-RSA
-    # tanpa menghapus data konfigurasi lama.
-
-    while IFS= read -r -d '' item; do
-        local relative="${item#"$temp_dir/extracted/"}"
-
-        if [[ "$relative" == server/* ]]; then
-            continue
-        fi
-
-        if [[ "$relative" == */* ]]; then
-            mkdir -p "$OVPN_DIR/$(dirname "$relative")"
-        fi
-
-        cp -a "$item" "$OVPN_DIR/$relative" || {
-            rm -rf "$temp_dir"
-            print_error "Gagal memasang file tambahan: $relative"
-            return 1
-        }
-
-    done < <(find "$temp_dir/extracted" -mindepth 1 -type f -print0)
-
-    rm -rf "$temp_dir"
-
-    if [[ ! -s "$SERVER_DIR/server-tcp.conf" ||
-          ! -s "$SERVER_DIR/server-udp.conf" ]]; then
-
-        print_error "Konfigurasi TCP/UDP gagal dipasang"
-        return 1
-    fi
-
-    # ------------------------------------------
-    # PERSIAPAN DIRECTORY
-    # ------------------------------------------
-
-    mkdir -p "$SERVER_DIR/easy-rsa"
-    mkdir -p /var/log/openvpn
-    mkdir -p /run/openvpn-server
-
-    # ------------------------------------------
-    # GENERATE CA DAN SERVER CERTIFICATE
-    # ------------------------------------------
-
-    print_install "Memeriksa sertifikat OpenVPN"
-
-    cd "$SERVER_DIR" || return 1
-
-    local regenerate_ca=0
-
-    if [[ ! -s ca.crt || ! -s ca.key ]]; then
-        regenerate_ca=1
-    elif ! openssl x509 -in ca.crt -noout >/dev/null 2>&1 ||
-         ! openssl pkey -in ca.key -noout >/dev/null 2>&1 ||
-         ! openssl x509 -in ca.crt -checkend 0 -noout >/dev/null 2>&1; then
-        regenerate_ca=1
-    else
-        local cert_pub
-        local key_pub
-
-        cert_pub="$(openssl x509 -in ca.crt -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | base64 -w0)"
-        key_pub="$(openssl pkey -in ca.key -pubout -outform DER 2>/dev/null | base64 -w0)"
-
-        if [[ -z "$cert_pub" || "$cert_pub" != "$key_pub" ]]; then
-            regenerate_ca=1
-        fi
-    fi
-
-    if [[ "$regenerate_ca" -eq 1 ]]; then
-
-        print_install "Membuat CA baru"
-
-        if ! openssl req -x509 -newkey rsa:2048 \
-            -nodes \
-            -keyout ca.key.tmp \
-            -out ca.crt.tmp \
-            -days 3650 \
-            -sha256 \
-            -subj "/CN=${domain}-OpenVPN-CA"; then
-
-            rm -f ca.key.tmp ca.crt.tmp
-            print_error "Gagal membuat CA OpenVPN"
-            return 1
-        fi
-
-        mv ca.key.tmp ca.key
-        mv ca.crt.tmp ca.crt
-
-        chmod 600 ca.key
-        chmod 644 ca.crt
-
-        print_success "CA baru berhasil dibuat"
-    fi
-
-    # ------------------------------------------
-    # VALIDASI SERVER CERTIFICATE
-    # ------------------------------------------
-
-    local regenerate_server=0
-
-    if [[ ! -s server.crt || ! -s server.key ]]; then
-        regenerate_server=1
-    elif ! openssl x509 -in server.crt -noout >/dev/null 2>&1 ||
-         ! openssl pkey -in server.key -noout >/dev/null 2>&1 ||
-         ! openssl x509 -in server.crt -checkend 0 -noout >/dev/null 2>&1 ||
-         ! openssl verify -CAfile ca.crt server.crt >/dev/null 2>&1; then
-        regenerate_server=1
-    else
-        local server_cert_pub
-        local server_key_pub
-
-        server_cert_pub="$(openssl x509 -in server.crt -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | base64 -w0)"
-        server_key_pub="$(openssl pkey -in server.key -pubout -outform DER 2>/dev/null | base64 -w0)"
-
-        if [[ -z "$server_cert_pub" || "$server_cert_pub" != "$server_key_pub" ]]; then
-            regenerate_server=1
-        fi
-    fi
-
-    if [[ "$regenerate_server" -eq 1 ]]; then
-
-        print_install "Membuat sertifikat server OpenVPN"
-
-        if ! openssl genrsa -out server.key 2048; then
-            print_error "Gagal membuat server.key"
-            return 1
-        fi
-
-        if ! openssl req -new \
-            -key server.key \
-            -out server.csr \
-            -subj "/CN=${domain}"; then
-
-            print_error "Gagal membuat server CSR"
-            return 1
-        fi
-
-        cat > server.ext <<EOF
-basicConstraints=CA:FALSE
-keyUsage=digitalSignature,keyEncipherment
-extendedKeyUsage=serverAuth
-subjectAltName=DNS:${domain}
-EOF
-
-        if ! openssl x509 -req \
-            -in server.csr \
-            -CA ca.crt \
-            -CAkey ca.key \
-            -CAcreateserial \
-            -out server.crt \
-            -days 3650 \
-            -sha256 \
-            -extfile server.ext; then
-
-            print_error "Gagal menerbitkan sertifikat server"
-            return 1
-        fi
-
-        rm -f server.csr server.ext
-
-        print_success "Sertifikat server berhasil dibuat"
-    fi
-
-    chmod 600 ca.key server.key
-    chmod 644 ca.crt server.crt
-
-    chown -R root:root "$SERVER_DIR"
-
-    cd /root || return 1
-
-    print_success "Konfigurasi dan sertifikat OpenVPN siap"
+rm -rf /etc/openvpn
+mkdir -p /etc/openvpn
+wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
+unzip -o -d /etc/openvpn/ /etc/openvpn/vpn.zip
+rm -f /etc/openvpn/vpn.zip
+# [FIX] jangan lanjut diam-diam bila vpn.zip gagal diunduh/diekstrak (openssl di bawah akan menulis ke folder yang salah)
+[ -s /etc/openvpn/server/server-tcp.conf ] && [ -s /etc/openvpn/server/server-udp.conf ] || { echo "vpn.zip gagal diunduh/diekstrak"; exit 1; }
+# Sertifikat server bawaan sudah kedaluwarsa (2023) dan vpn.zip TIDAK memuat ca.key maupun server.key.
+# [FIX] bila ca.key tidak ada, buat CA baru; lalu terbitkan sertifikat server baru yang ditandatangani CA tsb.
+cd /etc/openvpn/server || exit 1
+if [ ! -s ca.key ]; then
+openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 3650 -sha256 -subj "/CN=ChangeMe" || exit 1
+fi
+openssl genrsa -out server.key 2048 || exit 1
+openssl req -new -key server.key -out server.csr -subj "/CN=server" || exit 1
+printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' > server.ext
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days 3650 -sha256 -extfile server.ext || exit 1
+chmod 600 ca.key server.key
+rm -f server.csr server.ext
+chown -R root:root /etc/openvpn/server/easy-rsa/
 }
-
-# ==============================================
-# 2. CONFIGURASI PAM DAN OPENVPN
-# ==============================================
-
 function config_easy() {
-
-    print_install "Mengatur plugin PAM OpenVPN"
-
-    mkdir -p /usr/lib/openvpn
-
-    local PAMSO
-
-    PAMSO="$(find /usr/lib /usr/lib64 \
-        -type f \
-        -name openvpn-plugin-auth-pam.so \
-        -print -quit 2>/dev/null)"
-
-    if [[ -z "$PAMSO" || ! -s "$PAMSO" ]]; then
-        print_error "Plugin openvpn-plugin-auth-pam.so tidak ditemukan"
-        return 1
-    fi
-
-    if ! install -m 0644 "$PAMSO" \
-        /usr/lib/openvpn/openvpn-plugin-auth-pam.so; then
-
-        print_error "Gagal memasang plugin PAM"
-        return 1
-    fi
-
-    # ------------------------------------------
-    # OPENVPN COMPRESSION
-    # ------------------------------------------
-
-    local OVPNV
-
-    OVPNV="$(openvpn --version 2>/dev/null | head -n1 | awk '{print $2}')"
-
-    if [[ -z "$OVPNV" ]]; then
-        print_error "Versi OpenVPN tidak dapat diperiksa"
-        return 1
-    fi
-
-    if [[ "$OVPNV" == 2.6* || "$OVPNV" == 2.7* || "$OVPNV" == 3.* ]]; then
-
-        for f in server-tcp.conf server-udp.conf; do
-
-            local conf="$SERVER_DIR/$f"
-
-            if ! grep -qiE '^[[:space:]]*allow-compression[[:space:]]' "$conf"; then
-                echo "allow-compression yes" >> "$conf"
-            fi
-
-        done
-    fi
-
-    # ------------------------------------------
-    # REMOVE DAEMON DIRECTIVE
-    # ------------------------------------------
-
-    sed -i '/^[[:space:]]*daemon[[:space:]]*$/d' \
-        "$SERVER_DIR/server-tcp.conf" \
-        "$SERVER_DIR/server-udp.conf"
-
-    # ------------------------------------------
-    # VALIDASI FILE CONFIG
-    # ------------------------------------------
-
-    for f in server-tcp.conf server-udp.conf; do
-
-        if [[ ! -s "$SERVER_DIR/$f" ]]; then
-            print_error "File $f tidak ditemukan"
-            return 1
-        fi
-
-        if grep -qE '^[[:space:]]*plugin[[:space:]]' "$SERVER_DIR/$f"; then
-
-            if ! grep -Fq "/usr/lib/openvpn/openvpn-plugin-auth-pam.so" "$SERVER_DIR/$f"; then
-
-                print_error "Path plugin PAM dalam $f berbeda dari lokasi plugin yang dipasang"
-                return 1
-            fi
-        fi
-
-    done
-
-    print_success "Konfigurasi PAM dan OpenVPN selesai"
+cd
+mkdir -p /usr/lib/openvpn/
+# [FIX] lokasi plugin PAM bisa berbeda antar distro/arsitektur
+PAMSO=$(find /usr/lib -name 'openvpn-plugin-auth-pam.so' 2>/dev/null | grep -v '^/usr/lib/openvpn/' | head -n 1)
+cp "$PAMSO" /usr/lib/openvpn/openvpn-plugin-auth-pam.so || exit 1
+# [FIX] OpenVPN >= 2.6: allow-compression default "no" menolak comp-lzo di config server
+OVPNV=$(openvpn --version 2>/dev/null | head -n1 | awk '{print $2}')
+if [[ "$OVPNV" =~ ^2\.([5-9]|[1-9][0-9])\. || "$OVPNV" =~ ^[3-9]\. ]]; then
+for f in server-tcp.conf server-udp.conf; do grep -q '^allow-compression' /etc/openvpn/server/$f || echo 'allow-compression yes' >> /etc/openvpn/server/$f; done
+fi
+systemctl reset-failed 'openvpn-server@*' >/dev/null 2>&1
+sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
+systemctl enable --now openvpn-server@server-tcp
+systemctl enable --now openvpn-server@server-udp
+/etc/init.d/openvpn restart
 }
-
-# ==============================================
-# 3. MEMBUAT CLIENT CONFIGURATION
-# ==============================================
-
 function make_follow() {
-
-    print_install "Membuat konfigurasi client OpenVPN"
-
-    if [[ -z "$domain" ]]; then
-        print_error "Domain tidak ditemukan"
-        return 1
-    fi
-
-    mkdir -p "$OVPN_DIR"
-
-    # ------------------------------------------
-    # ENABLE IP FORWARDING
-    # ------------------------------------------
-
-    cat > /etc/sysctl.d/99-openvpn-forward.conf <<'EOF'
-net.ipv4.ip_forward=1
-EOF
-
-    sysctl -w net.ipv4.ip_forward=1 >/dev/null || {
-        print_error "Gagal mengaktifkan IP forwarding"
-        return 1
-    }
-
-    sysctl --system >/dev/null || {
-        print_error "Gagal menerapkan sysctl"
-        return 1
-    }
-
-    # ------------------------------------------
-    # GENERATE CLIENT FILE
-    # ------------------------------------------
-
-    local file
-    local port
-    local proto
-
-    for file in tcp udp ws-ssl ssl; do
-
-        case "$file" in
-            tcp)
-                port="1194"
-                proto="tcp-client"
-                ;;
-            udp)
-                port="2200"
-                proto="udp"
-                ;;
-            ws-ssl|ssl)
-                port="443"
-                proto="tcp-client"
-                ;;
-        esac
-
-        cat > "$OVPN_DIR/${file}.ovpn" <<EOF
+echo 1 > /proc/sys/net/ipv4/ip_forward
+sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
+cat > /etc/openvpn/tcp.ovpn <<-END
 client
 dev tun
-proto ${proto}
-remote ${domain} ${port}
+proto tcp
+remote xxxxxxxxx 1194
 resolv-retry infinite
+route-method exe
 nobind
 persist-key
 persist-tun
 auth-user-pass
 comp-lzo
 verb 3
-EOF
-
-    done
-
-    print_success "Konfigurasi client TCP, UDP, SSL dan WS-SSL dibuat"
+END
+sed -i $MYIP2 /etc/openvpn/tcp.ovpn;
+cat > /etc/openvpn/udp.ovpn <<-END
+client
+dev tun
+proto udp
+remote xxxxxxxxx 2200
+resolv-retry infinite
+route-method exe
+nobind
+persist-key
+persist-tun
+auth-user-pass
+comp-lzo
+verb 3
+END
+sed -i $MYIP2 /etc/openvpn/udp.ovpn;
+cat > /etc/openvpn/ws-ssl.ovpn <<-END
+client
+dev tun
+proto tcp
+remote xxxxxxxxx 443
+resolv-retry infinite
+route-method exe
+nobind
+persist-key
+persist-tun
+auth-user-pass
+comp-lzo
+verb 3
+END
+sed -i $MYIP2 /etc/openvpn/ws-ssl.ovpn;
+cat > /etc/openvpn/ssl.ovpn <<-END
+client
+dev tun
+proto tcp
+remote xxxxxxxxx 443
+resolv-retry infinite
+route-method exe
+nobind
+persist-key
+persist-tun
+auth-user-pass
+comp-lzo
+verb 3
+END
+sed -i $MYIP2 /etc/openvpn/ssl.ovpn;
 }
-
-# ==============================================
-# 4. MEMASANG CA KE CLIENT CONFIG
-# ==============================================
-
 function cert_ovpn() {
-
-    print_install "Memasang sertifikat CA ke konfigurasi client"
-
-    if [[ ! -s "$SERVER_DIR/ca.crt" ]]; then
-        print_error "Sertifikat CA tidak ditemukan"
-        return 1
-    fi
-
-    mkdir -p "$WEB_DIR"
-
-    local file
-
-    for file in tcp udp ws-ssl ssl; do
-
-        local source="$OVPN_DIR/${file}.ovpn"
-        local temp="${source}.tmp"
-
-        if [[ ! -s "$source" ]]; then
-            print_error "File ${file}.ovpn tidak ditemukan"
-            return 1
-        fi
-
-        {
-            cat "$source"
-            printf '\n<ca>\n'
-            cat "$SERVER_DIR/ca.crt"
-            printf '</ca>\n'
-        } > "$temp" || {
-            rm -f "$temp"
-            print_error "Gagal memasang CA ke ${file}.ovpn"
-            return 1
-        }
-
-        mv "$temp" "$source"
-
-        chmod 644 "$source"
-
-        cp -f "$source" "$WEB_DIR/${file}.ovpn" || {
-            print_error "Gagal menyalin ${file}.ovpn ke web"
-            return 1
-        }
-
-    done
-
-    # ------------------------------------------
-    # MEMBUAT ZIP CLIENT
-    # ------------------------------------------
-
-    if ! command -v zip >/dev/null 2>&1; then
-        apt-get install -y zip || {
-            print_error "Gagal memasang ZIP"
-            return 1
-        }
-    fi
-
-    cd "$WEB_DIR" || return 1
-
-    rm -f Kyt-Project.zip
-
-    if ! zip -q Kyt-Project.zip \
-        tcp.ovpn \
-        udp.ovpn \
-        ssl.ovpn \
-        ws-ssl.ovpn; then
-
-        print_error "Gagal membuat Kyt-Project.zip"
-        return 1
-    fi
-
-    # ------------------------------------------
-    # MEMBUAT HALAMAN DOWNLOAD
-    # ------------------------------------------
-
-    cat > "$WEB_DIR/index.html" <<'EOF'
+echo '<ca>' >> /etc/openvpn/tcp.ovpn
+cat /etc/openvpn/server/ca.crt >> /etc/openvpn/tcp.ovpn
+echo '</ca>' >> /etc/openvpn/tcp.ovpn
+cp /etc/openvpn/tcp.ovpn /var/www/html/tcp.ovpn
+echo '<ca>' >> /etc/openvpn/udp.ovpn
+cat /etc/openvpn/server/ca.crt >> /etc/openvpn/udp.ovpn
+echo '</ca>' >> /etc/openvpn/udp.ovpn
+cp /etc/openvpn/udp.ovpn /var/www/html/udp.ovpn
+echo '<ca>' >> /etc/openvpn/ws-ssl.ovpn
+cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ws-ssl.ovpn
+echo '</ca>' >> /etc/openvpn/ws-ssl.ovpn
+cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
+echo '</ca>' >> /etc/openvpn/ssl.ovpn
+cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ssl.ovpn
+cd /var/www/html/
+zip Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn > /dev/null 2>&1
+cd
+cat <<'mySiteOvpn' > /var/www/html/index.html
 <!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenVPN Config Download</title>
-</head>
+<html lang="en">
+<!-- Simple OVPN Download site -->
+<head><meta charset="utf-8"><title>OpenVPN Config Download</title></head>
 <body>
 <h2>OpenVPN Config Download</h2>
 <ul>
@@ -578,264 +138,36 @@ function cert_ovpn() {
 <li><a href="udp.ovpn">OpenVPN UDP</a></li>
 <li><a href="ssl.ovpn">OpenVPN SSL</a></li>
 <li><a href="ws-ssl.ovpn">OpenVPN WS-SSL</a></li>
-<li><a href="Kyt-Project.zip">Download Semua Config</a></li>
+<li><a href="Kyt-Project.zip">Semua config (zip)</a></li>
 </ul>
 </body>
 </html>
-EOF
+mySiteOvpn
 
-    cd /root || return 1
+#firewall untuk memperbolehkan akses UDP dan akses jalur TCP
+# [FIX] $ANU tidak pernah didefinisikan -> aturan MASQUERADE gagal
+ANU=$(ip -o -4 route show to default | awk '{print $5}' | head -n 1)
+iptables -t nat -I POSTROUTING -s 10.6.0.0/24 -o $ANU -j MASQUERADE
+iptables -t nat -I POSTROUTING -s 10.7.0.0/24 -o $ANU -j MASQUERADE
+iptables-save > /etc/iptables.up.rules
+chmod +x /etc/iptables.up.rules
 
-    print_success "Konfigurasi client dan halaman download berhasil dibuat"
+iptables-restore -t < /etc/iptables.up.rules
+netfilter-persistent save
+netfilter-persistent reload
+
+# Restart service openvpn
+systemctl enable openvpn
+systemctl start openvpn
+/etc/init.d/openvpn restart
+
+# Delete script
+history -c
+rm -f /root/vpn.sh
 }
-
-# ==============================================
-# 5. FIREWALL DAN NAT
-# ==============================================
-
-function make_firewall() {
-
-    print_install "Mengatur firewall dan NAT OpenVPN"
-
-    local ANU
-
-    ANU="$(ip -o -4 route show to default | awk 'NR==1 {print $5}')"
-
-    if [[ -z "$ANU" ]]; then
-        print_error "Interface jaringan utama tidak ditemukan"
-        return 1
-    fi
-
-    # ------------------------------------------
-    # NAT TCP / UDP
-    # ------------------------------------------
-
-    for subnet in 10.6.0.0/24 10.7.0.0/24; do
-
-        if ! iptables -t nat -C POSTROUTING \
-            -s "$subnet" \
-            -o "$ANU" \
-            -j MASQUERADE 2>/dev/null; then
-
-            if ! iptables -t nat -A POSTROUTING \
-                -s "$subnet" \
-                -o "$ANU" \
-                -j MASQUERADE; then
-
-                print_error "Gagal memasang NAT untuk $subnet"
-                return 1
-            fi
-        fi
-
-    done
-
-    # ------------------------------------------
-    # PERSIST FIREWALL
-    # ------------------------------------------
-
-    if command -v netfilter-persistent >/dev/null 2>&1; then
-
-        netfilter-persistent save || {
-            print_error "Gagal menyimpan firewall"
-            return 1
-        }
-
-        netfilter-persistent reload || {
-            print_error "Gagal memuat ulang firewall"
-            return 1
-        }
-
-    else
-
-        iptables-save > /etc/iptables.up.rules || {
-            print_error "Gagal menyimpan aturan iptables"
-            return 1
-        }
-
-    fi
-
-    print_success "Firewall dan NAT OpenVPN berhasil dikonfigurasi"
-}
-
-# ==============================================
-# 6. SYSTEMD OPENVPN
-# ==============================================
-
-function start_openvpn() {
-
-    print_install "Mengaktifkan service OpenVPN TCP dan UDP"
-
-    # ------------------------------------------
-    # CEK KONFIGURASI SERVER
-    # ------------------------------------------
-
-    for f in server-tcp.conf server-udp.conf; do
-
-        if [[ ! -s "$SERVER_DIR/$f" ]]; then
-            print_error "Konfigurasi $f tidak ditemukan"
-            return 1
-        fi
-
-    done
-
-    # ------------------------------------------
-    # CEK SYSTEMD TEMPLATE
-    # ------------------------------------------
-
-    if ! systemctl cat openvpn-server@.service >/dev/null 2>&1; then
-
-        cat > /etc/systemd/system/openvpn-server@.service <<'EOF'
-[Unit]
-Description=OpenVPN Server Instance %i
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=/etc/openvpn/server
-RuntimeDirectory=openvpn-server-%i
-RuntimeDirectoryMode=0755
-ExecStart=/usr/sbin/openvpn --config /etc/openvpn/server/%i.conf --status /run/openvpn-server-%i/status.log --status-version 2
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    fi
-
-    systemctl daemon-reload || {
-        print_error "Gagal reload systemd"
-        return 1
-    }
-
-    # ------------------------------------------
-    # ENABLE SERVICE
-    # ------------------------------------------
-
-    systemctl enable \
-        openvpn-server@server-tcp \
-        openvpn-server@server-udp || {
-        print_error "Gagal mengaktifkan service OpenVPN"
-        return 1
-    }
-
-    # ------------------------------------------
-    # START TCP
-    # ------------------------------------------
-
-    if ! systemctl restart openvpn-server@server-tcp; then
-
-        print_error "OpenVPN TCP gagal dijalankan"
-
-        journalctl -u openvpn-server@server-tcp \
-            -n 40 --no-pager
-
-        return 1
-    fi
-
-    # ------------------------------------------
-    # START UDP
-    # ------------------------------------------
-
-    if ! systemctl restart openvpn-server@server-udp; then
-
-        print_error "OpenVPN UDP gagal dijalankan"
-
-        journalctl -u openvpn-server@server-udp \
-            -n 40 --no-pager
-
-        return 1
-    fi
-
-    # ------------------------------------------
-    # VALIDASI SERVICE
-    # ------------------------------------------
-
-    for service_name in \
-        openvpn-server@server-tcp \
-        openvpn-server@server-udp; do
-
-        if ! systemctl is-active --quiet "$service_name"; then
-
-            print_error "Service ${service_name} belum aktif"
-
-            systemctl status "$service_name" --no-pager -l
-            journalctl -u "$service_name" -n 40 --no-pager
-
-            return 1
-        fi
-
-        print_success "${service_name} RUNNING"
-    done
-
-    print_success "OpenVPN TCP dan UDP berhasil berjalan"
-}
-
-# ==============================================
-# 7. MAIN INSTALLATION
-# ==============================================
-
-function main_openvpn() {
-
-    clear
-
-    print_install "MEMULAI INSTALASI OPENVPN"
-
-    ovpn_install || return 1
-
-    config_easy || return 1
-
-    make_follow || return 1
-
-    cert_ovpn || return 1
-
-    make_firewall || return 1
-
-    start_openvpn || return 1
-
-    # ------------------------------------------
-    # FINAL CHECK
-    # ------------------------------------------
-
-    if [[ ! -s "$SERVER_DIR/server.crt" ||
-          ! -s "$SERVER_DIR/server.key" ||
-          ! -s "$SERVER_DIR/ca.crt" ]]; then
-
-        print_error "Sertifikat OpenVPN tidak lengkap"
-        return 1
-    fi
-
-    print_success "OPENVPN BERHASIL DIINSTAL"
-
-    echo ""
-    echo "======================================"
-    echo "       OPENVPN INSTALLATION"
-    echo "======================================"
-    echo "Domain : $domain"
-    echo "IP VPS : $MYIP"
-    echo "TCP    : 1194"
-    echo "UDP    : 2200"
-    echo "SSL    : 443"
-    echo "======================================"
-    echo "TCP    : RUNNING"
-    echo "UDP    : RUNNING"
-    echo "======================================"
-    echo "Client : /var/www/html/"
-    echo "======================================"
-
-    return 0
-}
-
-# ==============================================
-# RUN INSTALLATION
-# ==============================================
-
-main_openvpn || {
-    print_error "INSTALASI OPENVPN GAGAL"
-    exit 1
-}
-
-exit 0
+# [FIX] file asli terpotong dan tidak memanggil satu pun fungsi di atas
+ovpn_install
+config_easy
+make_follow
+cert_ovpn
+[ -s /etc/openvpn/server/server.crt ] && [ -s /etc/openvpn/server/server.key ] && [ -s /etc/openvpn/server/ca.crt ] || exit 1
