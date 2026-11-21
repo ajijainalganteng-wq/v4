@@ -360,9 +360,9 @@ function pasang_ssl() {
 # ==============================
 echo -e "\e[1;32mPlease Wait While We Generate Your Domain\e[0m"
 
-CF_ID="ajijainalganteng-wq@gmail.com"
-CF_KEY="cfk_nrdaMbo2yhwoPzWp8OcXtarJjO0GwlqIMTRBDg4B48c636ae"
-CF_DOMAIN="allserver.web.id"
+CF_ID="ajijainalganteng@gmail.com"
+CF_KEY="cfk_ZVBC9kEehWaK7jShVSqrBzvGidktF41BvKPxusM4a0895611"
+CF_DOMAIN="satsetvpn.web.id"
 SUB="test$((RANDOM % 10 + 1))"
 CF_IP=$(cat /usr/bin/ipsave)
 
