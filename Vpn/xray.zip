@@ -598,7 +598,7 @@ debconf-set-selections <<<"keyboard-configuration keyboard-configuration/xkb-key
 cd
 cat > /etc/systemd/system/rc-local.service <<-END
 [Unit]
-Description=/etc/rc.local Compatibility
+Description=/etc/rc.local
 ConditionFileIsExecutable=/etc/rc.local
 After=network.target
 
