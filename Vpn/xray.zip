@@ -513,12 +513,6 @@ LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target
 EOF
-
-# Memuat konfigurasi systemd dan menjalankan Xray
-systemctl daemon-reload
-systemctl enable xray >/dev/null 2>&1
-systemctl restart xray
-
 print_success "Konfigurasi Packet"
 }
 function ssh(){
