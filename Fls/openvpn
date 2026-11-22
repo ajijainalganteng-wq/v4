@@ -101,9 +101,10 @@ echo '<ca>' >> /etc/openvpn/ws-ssl.ovpn
 cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ws-ssl.ovpn
 echo '</ca>' >> /etc/openvpn/ws-ssl.ovpn
 cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
+echo '<ca>' >> /etc/openvpn/ssl.ovpn
+cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ssl.ovpn
 echo '</ca>' >> /etc/openvpn/ssl.ovpn
-cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ssl.ovpn
-cd /var/www/html/
+cp /etc/openvpn/ssl.ovpn /var/www/html/ssl.ovpn
 zip Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn > /dev/null 2>&1
 cd
 cat <<'mySiteOvpn' > /var/www/html/index.html
