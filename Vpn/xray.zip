@@ -493,7 +493,17 @@ LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target
 EOF
-print_success "Konfigurasi Packet"
+systemctl daemon-reload
+    if ! nginx -t || ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
+        print_error "Konfigurasi Nginx/HAProxy tidak valid"
+        exit 1
+    fi
+    if ! systemctl enable --now xray; then
+        journalctl -u xray -n 20 --no-pager >&2 || true
+        print_error "Xray gagal dijalankan"
+        exit 1
+    fi
+    print_success "Konfigurasi Packet"
 }
 function ssh(){
 clear
