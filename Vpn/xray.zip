@@ -983,52 +983,21 @@ chmod +x udp.sh
 ./udp.sh
 print_success "UDP-CUSTOM BY ARISCTUNNEL V4"
 }
-
 function ins_restart(){
 clear
-print_install "Restarting All Packet"
-
-systemctl daemon-reload
-
+print_install "Restarting  All Packet"
 /etc/init.d/nginx restart
-
-# Restart OpenVPN sesuai unit yang tersedia
-if systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^openvpn-server@'; then
-    if [ -f /etc/openvpn/server/server.conf ]; then
-        systemctl enable openvpn-server@server
-        systemctl restart openvpn-server@server
-    elif [ -f /etc/openvpn/server/server-tcp.conf ]; then
-        systemctl enable openvpn-server@server-tcp
-        systemctl restart openvpn-server@server-tcp
-    elif [ -f /etc/openvpn/server/server-udp.conf ]; then
-        systemctl enable openvpn-server@server-udp
-        systemctl restart openvpn-server@server-udp
-    fi
-elif systemctl list-unit-files --type=service --no-legend 2>/dev/null | grep -q '^openvpn@'; then
-    if [ -f /etc/openvpn/server.conf ]; then
-        systemctl enable openvpn@server
-        systemctl restart openvpn@server
-    elif [ -f /etc/openvpn/server/server.conf ]; then
-        systemctl enable openvpn@server
-        systemctl restart openvpn@server
-    fi
-elif [ -x /etc/init.d/openvpn ]; then
-    /etc/init.d/openvpn restart
-fi
-
 /etc/init.d/ssh restart
 /etc/init.d/dropbear restart
 /etc/init.d/fail2ban restart
 /etc/init.d/vnstat restart
-
 systemctl restart haproxy
 /etc/init.d/cron restart
 systemctl restart zivpn
+systemctl daemon-reload
 systemctl start netfilter-persistent
-
 systemctl enable --now nginx
 systemctl enable --now xray
-systemctl restart xray
 systemctl enable --now rc-local
 systemctl enable --now dropbear
 systemctl enable --now cron
@@ -1037,14 +1006,13 @@ systemctl enable --now netfilter-persistent
 systemctl enable --now ws
 systemctl enable --now fail2ban
 systemctl enable --now udp-custom
-
+systemctl enable --NOW noobzvpns
 history -c
 echo "unset HISTFILE" >> /etc/profile
 cd
 rm -f /root/openvpn
 rm -f /root/key.pem
 rm -f /root/cert.pem
-
 print_success "All Packet"
 }
 function menuv4(){
