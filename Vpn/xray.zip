@@ -1230,37 +1230,61 @@ service cron restart
 cat >/home/daily_reboot <<-END
 5
 END
-cat >/etc/systemd/system/rc-local.service <<EOF
+cat > /etc/systemd/system/rc-local.service <<'EOF'
 [Unit]
-Description=/etc/rc.local
-ConditionPathExists=/etc/rc.local
+Description=/etc/rc.local Compatibility
+ConditionFileIsExecutable=/etc/rc.local
+After=network.target
+
 [Service]
-Type=forking
+Type=oneshot
 ExecStart=/etc/rc.local start
-TimeoutSec=0
-StandardOutput=tty
+TimeoutStartSec=0
 RemainAfterExit=yes
-SysVStartPriority=99
+StandardOutput=journal
+StandardError=journal
+
 [Install]
 WantedBy=multi-user.target
 EOF
 echo "/bin/false" >>/etc/shells
 echo "/usr/sbin/nologin" >>/etc/shells
-cat >/etc/rc.local <<EOF
+
+cat > /etc/rc.local <<'EOF'
 #!/bin/bash
-iptables -I INPUT -p udp --dport 5300 -j ACCEPT
-iptables -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300
-systemctl restart netfilter-persistent
+
+# Pastikan iptables tersedia
+IPTABLES="/usr/sbin/iptables"
+
+if ! command -v iptables >/dev/null 2>&1; then
+    echo "ERROR: iptables tidak ditemukan."
+    exit 1
+fi
+
+IPTABLES=$(command -v iptables)
+
+# Izinkan UDP port 5300
+$IPTABLES -C INPUT -p udp --dport 5300 -j ACCEPT 2>/dev/null ||
+$IPTABLES -I INPUT -p udp --dport 5300 -j ACCEPT
+
+# Redirect DNS UDP port 53 ke port 5300
+$IPTABLES -t nat -C PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300 2>/dev/null ||
+$IPTABLES -t nat -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 5300
+
 exit 0
 EOF
-chmod +x /etc/rc.local
-AUTOREB=$(cat /home/daily_reboot)
+
+chmod 755 /etc/rc.local
+
+AUTOREB=$(cat /home/daily_reboot 2>/dev/null)
 SETT=11
-if [ $AUTOREB -gt $SETT ]; then
-TIME_DATE="PM"
+
+if [[ "$AUTOREB" =~ ^[0-9]+$ ]] && [ "$AUTOREB" -gt "$SETT" ]; then
+    TIME_DATE="PM"
 else
-TIME_DATE="AM"
+    TIME_DATE="AM"
 fi
+
 print_success "Menu Packet"
 }
 function enable_services(){
