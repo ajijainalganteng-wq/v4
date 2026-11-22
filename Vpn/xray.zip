@@ -596,7 +596,6 @@ debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variant
 debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variant select English"
 debconf-set-selections <<<"keyboard-configuration keyboard-configuration/xkb-keymap select "
 cd
-
 # Membuat service rc-local untuk Ubuntu/Debian terbaru
 cat > /etc/systemd/system/rc-local.service <<'END'
 [Unit]
@@ -615,47 +614,16 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 END
-
-# Membuat file rc.local
-cat > /etc/rc.local <<'END'
-#!/bin/bash
-
-#Menonaktifkan IPv6
-echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-
+cat > /etc/rc.local <<-END
 exit 0
 END
-
-# Memberikan izin eksekusi
 chmod +x /etc/rc.local
-
-# Mengatur zona waktu Jakarta
-ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
-
-# Menonaktifkan AcceptEnv pada konfigurasi SSH
-if [ -f /etc/ssh/sshd_config ]; then
-    sed -i 's/^[[:space:]]*AcceptEnv[[:space:]]/#AcceptEnv /' /etc/ssh/sshd_config
-fi
-
-# Memuat ulang konfigurasi systemd
-systemctl daemon-reload
-
-# Mengaktifkan rc-local
-systemctl enable rc-local.service
-
-# Menjalankan rc-local
-systemctl restart rc-local.service
-
-# Memastikan IPv6 dinonaktifkan saat ini
+systemctl enable rc-local
+systemctl start rc-local.service
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-
-# Memeriksa konfigurasi SSH sebelum restart
-if sshd -t 2>/dev/null; then
-    systemctl restart ssh 2>/dev/null || systemctl restart sshd
-else
-    echo "Peringatan: Konfigurasi SSH tidak valid. SSH tidak direstart."
-fi
-
+sed -i '$ i\echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6' /etc/rc.local
+ln -fs /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+sed -i 's/AcceptEnv/#AcceptEnv/g' /etc/ssh/sshd_config
 print_success "Password SSH"
 }
 function udp_mini(){
