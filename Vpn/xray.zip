@@ -651,67 +651,14 @@ print_success "SSHD"
 clear
 function ins_dropbear(){
 clear
-local dropbear_version="2026.94"
-local build_dir="/usr/local/src/dropbear-${dropbear_version}"
-local archive="/tmp/dropbear-${dropbear_version}.tar.bz2"
-print_install "Menginstall Dropbear versi ${dropbear_version}"
-apt-get install -y --no-install-recommends dropbear build-essential zlib1g-dev libpam0g-dev ca-certificates curl bzip2 || {
-print_error "Gagal memasang dependensi Dropbear"
-return 1
+print_install "Menginstall Dropbear"
+apt-get install dropbear -y > /dev/null 2>&1
+wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+chmod +x /etc/default/dropbear
+/etc/init.d/dropbear restart
+/etc/init.d/dropbear status
+print_success "Dropbear"
 }
-systemctl stop dropbear >/dev/null 2>&1
-{ wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf" || wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear"; } || {
-print_error "Gagal mengambil konfigurasi Dropbear dari repository"
-return 1
-}
-wget -q -O /etc/banner.txt "${REPO}banner.txt" || touch /etc/banner.txt
-chmod 644 /etc/default/dropbear /etc/banner.txt
-mkdir -p /usr/local/src
-rm -rf "$build_dir"
-curl -fL --retry 3 --retry-delay 2 "https://matt.ucc.asn.au/dropbear/releases/dropbear-${dropbear_version}.tar.bz2" -o "$archive" || {
-print_error "Gagal mengunduh source Dropbear"
-return 1
-}
-tar -xjf "$archive" -C /usr/local/src || {
-print_error "Gagal mengekstrak source Dropbear"
-return 1
-}
-cd "$build_dir" || return 1
-./configure --prefix=/usr --sysconfdir=/etc/dropbear --enable-pam || {
-print_error "Konfigurasi build Dropbear gagal"
-cd
-return 1
-}
-make -j"$(nproc)" PROGRAMS="dropbear dropbearkey" || {
-print_error "Build Dropbear gagal"
-cd
-return 1
-}
-cp -a /usr/sbin/dropbear /usr/sbin/dropbear.ubuntu.bak >/dev/null 2>&1 || true
-make PROGRAMS="dropbear dropbearkey" install || {
-print_error "Instalasi binary Dropbear gagal"
-cd
-return 1
-}
-cd
-rm -rf "$build_dir" "$archive"
-mkdir -p /etc/dropbear
-for _kt in rsa ecdsa ed25519; do [[ -s /etc/dropbear/dropbear_${_kt}_host_key ]] || dropbearkey -t ${_kt} -f /etc/dropbear/dropbear_${_kt}_host_key >/dev/null 2>&1; done
-systemctl daemon-reload
-systemctl enable --now dropbear || {
-print_error "Service Dropbear gagal dijalankan"
-systemctl status dropbear --no-pager -l
-return 1
-}
-if ! systemctl is-active --quiet dropbear; then
-print_error "Dropbear belum aktif"
-systemctl status dropbear --no-pager -l
-return 1
-fi
-dropbear -V 2>&1 | head -n 1
-print_success "Dropbear ${dropbear_version}"
-}
-
 clear
 function ins_vnstat(){
 clear
