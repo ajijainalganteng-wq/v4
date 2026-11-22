@@ -452,61 +452,156 @@ echo "& plughin Account" >>/etc/shadowsocks/.shadowsocks.db
 echo "& plughin Account" >>/etc/ssh/.ssh.db
 }
 function install_xray() {
-clear
-print_install "Core Xray Latest Version"
+    clear
+    print_install "Core Xray Latest Version"
 
-domainSock_dir="/run/xray"
-mkdir -p "$domainSock_dir"
-chown www-data:www-data "$domainSock_dir"
+    # Membuat direktori runtime Xray
+    install -d -m 755 -o www-data -g www-data /run/xray
 
-latest_version="$(curl -fsSL https://api.github.com/repos/XTLS/Xray-core/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')"
+    # Menggunakan installer resmi XTLS
+    local version="${XRAY_VERSION:-}"
+    local installer
+    local version_args=()
 
-if [[ -z "$latest_version" ]]; then
-    print_error "Gagal mendapatkan versi terbaru Xray"
-    exit 1
-fi
+    if [[ -n "$version" ]]; then
+        version_args=(--version "$version")
+    fi
 
-bash -c "$(curl -fsSL https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install -u www-data --version "$latest_version"
+    installer=$(mktemp /tmp/xray-installer.XXXXXX) || {
+        print_error "Gagal membuat file installer"
+        exit 1
+    }
 
-if [[ ! -x /usr/local/bin/xray ]]; then
-    print_error "Binary Xray tidak ditemukan"
-    exit 1
-fi
+    if ! curl --retry 3 --connect-timeout 15 -fsSL \
+        "https://github.com/XTLS/Xray-install/raw/main/install-release.sh" \
+        -o "$installer"; then
+        rm -f "$installer"
+        print_error "Gagal mengunduh installer Xray resmi"
+        exit 1
+    fi
 
-mkdir -p /etc/xray
+    if ! bash "$installer" install \
+        -u www-data \
+        "${version_args[@]}" \
+        --no-update-service \
+        --without-logfiles \
+        --manually-restart-later; then
+        rm -f "$installer"
+        print_error "Instalasi binary Xray gagal"
+        exit 1
+    fi
 
-wget -q -O /etc/xray/config.json "${REPO}Cfg/config.json"
+    rm -f "$installer"
 
-if [[ ! -s /etc/xray/config.json ]]; then
-    print_error "File konfigurasi Xray kosong atau gagal diunduh"
-    exit 1
-fi
+    if [[ ! -x /usr/local/bin/xray ]]; then
+        print_error "Binary /usr/local/bin/xray tidak ditemukan"
+        exit 1
+    fi
 
-wget -q -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service"
+    # Mengambil konfigurasi lama
+    if ! declare -F fetch_file >/dev/null 2>&1; then
+        print_error "Fungsi fetch_file tidak ditemukan"
+        exit 1
+    fi
 
-domain=$(cat /etc/xray/domain)
-IPVS=$(cat /etc/xray/ipvps)
+    install -d -m 755 /etc/xray
 
-print_success "Core Xray $latest_version Berhasil Dipasang"
+    fetch_file "media/config.json" "/etc/xray/config.json" || {
+        print_error "Gagal mengunduh config.json"
+        exit 1
+    }
 
-clear
-print_install "Memasang Konfigurasi Packet"
+    fetch_file "media/runn.service" "/etc/systemd/system/runn.service" || {
+        print_error "Gagal mengunduh runn.service"
+        exit 1
+    }
 
-wget -q -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg"
-wget -q -O /etc/nginx/conf.d/xray.conf "${REPO}Cfg/xray.conf"
+    chown root:www-data /etc/xray/config.json
+    chmod 640 /etc/xray/config.json
 
-sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
-sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
+    # Membuat direktori log
+    install -d -m 750 -o www-data -g www-data /var/log/xray
+    touch /var/log/xray/access.log /var/log/xray/error.log
+    chown www-data:www-data /var/log/xray/access.log /var/log/xray/error.log
+    chmod 640 /var/log/xray/access.log /var/log/xray/error.log
 
-curl -fsSL "${REPO}Cfg/nginx.conf" -o /etc/nginx/nginx.conf
+    # Memeriksa konfigurasi Xray
+    if ! /usr/local/bin/xray run -test -config /etc/xray/config.json; then
+        print_error "Template konfigurasi Xray tidak valid"
+        exit 1
+    fi
 
-cat /etc/xray/xray.crt /etc/xray/xray.key > /etc/haproxy/hap.pem
+    print_success "Core Xray Berhasil Dipasang"
 
-chmod +x /etc/systemd/system/runn.service
+    clear
 
-rm -rf /etc/systemd/system/xray.service.d
+    # Mengambil informasi VPS
+    curl -fsSL --connect-timeout 8 https://ipinfo.io/city \
+        > /etc/xray/city || true
 
-cat >/etc/systemd/system/xray.service <<EOF
+    curl -fsSL --connect-timeout 8 https://ipinfo.io/org \
+        | cut -d " " -f 2-10 > /etc/xray/isp || true
+
+    print_install "Memasang Konfigurasi Packet"
+
+    # Memeriksa domain
+    if [[ ! -s /etc/xray/domain ]]; then
+        print_error "File domain Xray tidak ditemukan"
+        exit 1
+    fi
+
+    local domain
+    domain=$(cat /etc/xray/domain)
+
+    # Mengunduh konfigurasi HAProxy dan Nginx
+    fetch_file "media/haproxy.cfg" "/etc/haproxy/haproxy.cfg" || {
+        print_error "Gagal mengunduh konfigurasi HAProxy"
+        exit 1
+    }
+
+    fetch_file "media/xray.conf" "/etc/nginx/conf.d/xray.conf" || {
+        print_error "Gagal mengunduh konfigurasi Xray Nginx"
+        exit 1
+    }
+
+    sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
+    sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
+
+    fetch_file "media/nginx.conf" "/etc/nginx/nginx.conf" || {
+        print_error "Gagal mengunduh nginx.conf"
+        exit 1
+    }
+
+    # Membuat PEM untuk HAProxy
+    if [[ -x /usr/local/sbin/autoxray-ssl-reload ]]; then
+        if ! /usr/local/sbin/autoxray-ssl-reload; then
+            print_error "Gagal membuat PEM untuk HAProxy"
+            exit 1
+        fi
+    else
+        if [[ ! -s /etc/xray/xray.crt || ! -s /etc/xray/xray.key ]]; then
+            print_error "Sertifikat Xray tidak ditemukan"
+            exit 1
+        fi
+
+        cat /etc/xray/xray.crt /etc/xray/xray.key \
+            > /etc/haproxy/hap.pem || {
+            print_error "Gagal membuat PEM HAProxy"
+            exit 1
+        }
+    fi
+
+    if [[ ! -s /etc/haproxy/hap.pem ]]; then
+        print_error "File HAProxy PEM kosong"
+        exit 1
+    fi
+
+    chmod 644 /etc/systemd/system/runn.service
+
+    # Memasang service Xray
+    rm -rf /etc/systemd/system/xray.service.d
+
+    cat >/etc/systemd/system/xray.service <<'EOF'
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/XTLS/Xray-core
@@ -521,6 +616,7 @@ RuntimeDirectoryMode=0755
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
+UMask=0027
 ExecStartPre=/usr/local/bin/xray run -test -config /etc/xray/config.json
 ExecStart=/usr/local/bin/xray run -config /etc/xray/config.json
 Restart=on-failure
@@ -533,35 +629,38 @@ LimitNOFILE=1000000
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
+    systemctl daemon-reload
 
-if ! /usr/local/bin/xray run -test -config /etc/xray/config.json; then
-    print_error "Konfigurasi Xray tidak valid"
-    exit 1
-fi
+    # Memeriksa ulang konfigurasi Xray
+    if ! /usr/local/bin/xray run -test -config /etc/xray/config.json; then
+        print_error "Konfigurasi Xray tidak valid"
+        exit 1
+    fi
 
-if ! nginx -t || ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
-    print_error "Konfigurasi Nginx/HAProxy tidak valid"
-    exit 1
-fi
+    # Memeriksa Nginx dan HAProxy
+    if ! nginx -t || ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
+        print_error "Konfigurasi Nginx/HAProxy tidak valid"
+        exit 1
+    fi
 
-systemctl enable xray
+    # Mengaktifkan dan menjalankan Xray
+    systemctl enable xray
 
-if ! systemctl restart xray; then
-    journalctl -u xray -n 30 --no-pager >&2 || true
-    print_error "Xray gagal dijalankan"
-    exit 1
-fi
+    if ! systemctl restart xray; then
+        journalctl -u xray -n 30 --no-pager >&2 || true
+        print_error "Xray gagal dijalankan"
+        exit 1
+    fi
 
-sleep 2
+    sleep 2
 
-if ! systemctl is-active --quiet xray; then
-    journalctl -u xray -n 30 --no-pager >&2 || true
-    print_error "Xray gagal running"
-    exit 1
-fi
+    if ! systemctl is-active --quiet xray; then
+        journalctl -u xray -n 30 --no-pager >&2 || true
+        print_error "Xray gagal running"
+        exit 1
+    fi
 
-print_success "Konfigurasi Packet"
+    print_success "Konfigurasi Packet"
 }
 function ssh(){
 clear
