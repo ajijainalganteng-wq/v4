@@ -521,23 +521,47 @@ echo "& plughin Account" >>/etc/ssh/.ssh.db
 }
 function install_xray() {
 clear
-print_install "Core Xray 1.8.24 Latest Version"
-domainSock_dir="/run/xray";! [ -d $domainSock_dir ] && mkdir  $domainSock_dir
-chown www-data.www-data $domainSock_dir
+print_install "Core Xray Latest Stable Version"
+domainSock_dir="/run/xray";! [ -d $domainSock_dir ] && mkdir -p $domainSock_dir
+chown www-data:www-data $domainSock_dir
 chmod 755 $domainSock_dir
-latest_version="$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases | grep tag_name | sed -E 's/.*"v(.*)".*/\1/' | head -n 1)"
-curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o /tmp/install-xray.sh
-chmod +x /tmp/install-xray.sh
-bash /tmp/install-xray.sh install --version 1.8.24
+
+# Download installer resmi Xray
 rm -f /tmp/install-xray.sh
-# Fix ownership karena installer bikin user xray, kita pakai www-data
-chown www-data:www-data /var/log/xray /var/log/xray/* 2>/dev/null
-chown www-data:www-data /run/xray 2>/dev/null
+if ! curl -fL --retry 3 --retry-delay 2 https://github.com/XTLS/Xray-install/raw/main/install-release.sh -o /tmp/install-xray.sh; then
+    echo "Gagal mengunduh installer resmi Xray!"
+    return 1
+fi
+
+chmod +x /tmp/install-xray.sh
+
+# Install atau upgrade Xray ke versi stabil terbaru
+if ! bash /tmp/install-xray.sh install --no-update-service; then
+    echo "Gagal memasang Xray Core!"
+    rm -f /tmp/install-xray.sh
+    return 1
+fi
+
+rm -f /tmp/install-xray.sh
+
+# Verifikasi binary Xray
+if [ ! -x /usr/local/bin/xray ]; then
+    echo "Binary Xray tidak ditemukan!"
+    return 1
+fi
+
+# Ambil versi Xray yang berhasil dipasang
+latest_version="$(/usr/local/bin/xray version 2>/dev/null | head -n 1)"
+
+# Fix ownership karena installer membuat user xray, kita menggunakan www-data
+chown -R www-data:www-data /var/log/xray /run/xray 2>/dev/null
+chmod 755 /run/xray
+
 wget -O /etc/xray/config.json "${REPO}Cfg/config.json" >/dev/null 2>&1
 wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
 domain=$(cat /etc/xray/domain)
 IPVS=$(cat /etc/xray/ipvps)
-print_success "Core Xray 1.8.24 Latest Version"
+print_success "Core Xray $latest_version Installed Successfully"
 clear
 print_install "Memasang Konfigurasi Packet"
 wget -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg" >/dev/null 2>&1
