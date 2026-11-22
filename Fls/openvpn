@@ -5,11 +5,14 @@ MYIP=$(wget -qO- ipinfo.io/ip);
 domain=$(cat /root/domain)
 MYIP2="s/xxxxxxxxx/$domain/g";
 function ovpn_install() {
-rm -rf /etc/openvpn
-mkdir -p /etc/openvpn
+# Install OpenVPN dan Easy-RSA
+apt install openvpn easy-rsa unzip -y
+apt install openssl iptables iptables-persistent -y
+mkdir -p /etc/openvpn/server/easy-rsa/
+cd /etc/openvpn/
 wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip" >/dev/null 2>&1
-unzip -d /etc/openvpn/ /etc/openvpn/vpn.zip
-rm -f /etc/openvpn/vpn.zip
+unzip vpn.zi
+rm -f vpn.zip
 chown -R root:root /etc/openvpn/server/easy-rsa/
 }
 function config_easy() {
