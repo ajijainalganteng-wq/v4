@@ -129,9 +129,12 @@ config_easy
 make_follow
 make_follow
 cert_ovpn
-systemctl enable openvpn
-systemctl start openvpn
-/etc/init.d/openvpn restart
-/etc/init.d/openvpn status
+systemctl daemon-reload
+
+systemctl enable --now openvpn-server@server-tcp
+systemctl enable --now openvpn-server@server-udp
+
+systemctl status openvpn-server@server-tcp --no-pager
+systemctl status openvpn-server@server-udp --no-pager
 }
 install_ovpn
