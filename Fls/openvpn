@@ -53,7 +53,7 @@ echo "Mengunduh konfigurasi OpenVPN..."
 
 TMP_DIR=$(mktemp -d) || exit 1
 
-if ! wget -q -O "$TMP_DIR/vpn.zip" "${REPO}install/vpn.zip"; then
+if ! wget -q -O "$TMP_DIR/vpn.zip" "${REPO}Vpn/vpn.zip"; then
     echo "ERROR: Gagal mengunduh vpn.zip."
     rm -rf "$TMP_DIR"
     exit 1
