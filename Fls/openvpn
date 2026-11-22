@@ -103,7 +103,7 @@ function ovpn_install() {
         return 1
     }
 
-    if ! wget -q -O "$tmp_dir/vpn.zip" "https://raw.githubusercontent.com/ajijainalganteng-wq/WendyVpn/refs/heads/main/ovpn/vpn.zip"; then
+    if ! wget -q -O "$tmp_dir/vpn.zip" "https://raw.githubusercontent.com/arivpnstores/v4/main/Vpn/vpn.zip"; then
         echo "ERROR: Gagal mengunduh konfigurasi OpenVPN."
         rm -rf "$tmp_dir"
         return 1
