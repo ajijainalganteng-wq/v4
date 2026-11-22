@@ -6,8 +6,8 @@ domain=$(cat /root/domain)
 MYIP2="s/xxxxxxxxx/$domain/g";
 function ovpn_install() {
 # Install OpenVPN dan Easy-RSA
-apt install openvpn easy-rsa unzip -y
-apt install openssl iptables iptables-persistent -y
+apt-get update
+apt-get install -y openvpn easy-rsa unzip zip openssl iptables iptables-persistent
 mkdir -p /etc/openvpn/server/easy-rsa/
 cd /etc/openvpn/
 wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/Vpn/vpn.zip"
