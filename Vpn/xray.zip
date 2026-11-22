@@ -475,7 +475,6 @@ cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
 chmod +x /etc/systemd/system/runn.service
 rm -rf /etc/systemd/system/xray.service.d
 cat << EOF > /etc/systemd/system/xray.service
-at << EOF > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/xtls
