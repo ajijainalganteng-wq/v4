@@ -1,42 +1,29 @@
 #!/bin/bash
+# Decrypted by LT | FUSCATOR
+# Github- https://github.com/LunaticTunnel/Absurd
+# Lintas versi: Ubuntu 20.04+ & Debian 10+ (unit & layout OpenVPN
+# menyesuaikan otomatis lewat compat_openvpn_unit di bawah)
 
 export DEBIAN_FRONTEND=noninteractive
+OS=`uname -m`;
+MYIP=$(wget -qO- ipinfo.io/ip);
+domain=$(cat /root/domain)
+MYIP2="s/xxxxxxxxx/$domain/g";
 
-# Link Hosting
-REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/"
-
-# Deteksi IP dan interface jaringan
-PUBLIC_IP=$(curl -4 -fsS https://api.ipify.org) || exit 1
-DOMAIN=$(cat /root/domain 2>/dev/null | tr -d '[:space:]')
-REMOTE_HOST="${DOMAIN:-$PUBLIC_IP}"
-ANU=$(ip -4 route show default | awk 'NR==1 {print $5}')
-
-if [ -z "$ANU" ]; then
-    echo "ERROR: Interface jaringan tidak ditemukan."
-    exit 1
-fi
-
-# Instal OpenVPN dan dependensi
-apt-get update
-apt-get install -y openvpn easy-rsa unzip openssl iptables iptables-persistent curl wget zip
-
-if ! command -v openvpn >/dev/null 2>&1; then
-    echo "ERROR: Instalasi OpenVPN gagal."
-    exit 1
-fi
-
-# Deteksi service OpenVPN
+# --- Compat layer: pilih unit OpenVPN sesuai versi OS ---
+# Debian <=10 memakai unit openvpn@ + layout config /etc/openvpn/*.conf,
+# Debian 11+/Ubuntu 20.04+ memakai openvpn-server@ + /etc/openvpn/server/.
+# Coba muat universal_compat.sh; bila tidak ada, pakai definisi inline
+# yang identik agar script tetap bisa jalan mandiri.
 for _compat_candidate in "$(dirname "$0")/universal_compat.sh" "./universal_compat.sh" "/tmp/universal_compat.sh"; do
     if [ -f "$_compat_candidate" ]; then
         . "$_compat_candidate" >/dev/null 2>&1 || true
         break
     fi
 done
-
 if ! command -v compat_openvpn_unit >/dev/null 2>&1; then
     compat_openvpn_unit() {
         local inst="$1"
-
         if [ -f /lib/systemd/system/openvpn-server@.service ] || [ -f /etc/systemd/system/openvpn-server@.service ]; then
             echo "openvpn-server@${inst}"
         else
@@ -44,82 +31,49 @@ if ! command -v compat_openvpn_unit >/dev/null 2>&1; then
         fi
     }
 fi
-
 OVPN_TCP_UNIT=$(compat_openvpn_unit server-tcp)
 OVPN_UDP_UNIT=$(compat_openvpn_unit server-udp)
 
-# Ekstrak konfigurasi OpenVPN
-echo "Mengunduh konfigurasi OpenVPN..."
-
-TMP_DIR=$(mktemp -d) || exit 1
-
-if ! wget -q -O "$TMP_DIR/vpn.zip" "${REPO}Vpn/vpn.zip"; then
-    echo "ERROR: Gagal mengunduh vpn.zip."
-    rm -rf "$TMP_DIR"
-    exit 1
-fi
-
-if ! unzip -tq "$TMP_DIR/vpn.zip" >/dev/null 2>&1; then
-    echo "ERROR: File vpn.zip tidak valid."
-    rm -rf "$TMP_DIR"
-    exit 1
-fi
-
-mkdir -p /etc/openvpn
-
-if ! unzip -oq "$TMP_DIR/vpn.zip" -d /etc/openvpn/; then
-    echo "ERROR: Gagal mengekstrak vpn.zip."
-    rm -rf "$TMP_DIR"
-    exit 1
-fi
-
-rm -rf "$TMP_DIR"
-
-mkdir -p /etc/openvpn/server/easy-rsa/
-chown -R root:root /etc/openvpn/server/easy-rsa/
-
-# Penyesuaian konfigurasi cipher
 function ovpn_compat_config() {
+    # Direktif cipher dibuat kondisional mengikuti versi OpenVPN:
+    # - OpenVPN >= 2.5: data-ciphers dipertahankan (negosiasi modern).
+    # - OpenVPN 2.4 (Ubuntu 20.04/Debian 10): data-ciphers TIDAK dikenal
+    #   dan membuat server gagal start -> buang barisnya dan sisakan
+    #   'cipher' klasik sebagai fallback. Pola yang sama seperti
+    #   penyesuaian config HAProxy di setup-main.sh.
     local ver major_minor conf
-
     ver=$(openvpn --version 2>/dev/null | awk 'NR==1 {print $2}')
-    [ -n "$ver" ] || return 1
-
+    [ -n "$ver" ] || return 0
     major_minor=$(echo "$ver" | cut -d. -f1-2)
-
     if [ "$(printf '%s\n%s\n' "2.5" "$major_minor" | sort -V | head -n1)" = "2.5" ]; then
-        echo "OpenVPN $ver: menggunakan data-ciphers."
+        echo "OpenVPN $ver terdeteksi (>= 2.5): data-ciphers dipertahankan."
         return 0
     fi
-
-    echo "OpenVPN $ver: menyesuaikan cipher versi lama..."
-
+    echo "OpenVPN $ver terdeteksi (< 2.5): membuang data-ciphers dari config server..."
     for conf in /etc/openvpn/server/server-tcp.conf /etc/openvpn/server/server-udp.conf; do
         [ -f "$conf" ] || continue
-
-        sed -i '/^[[:space:]]*data-ciphers\(-fallback\)\?[[:space:]]/d' "$conf"
-
-        if ! grep -q '^[[:space:]]*cipher[[:space:]]' "$conf"; then
-            sed -i '1i cipher AES-256-GCM' "$conf"
-        fi
+        sed -i '/^data-ciphers/d' "$conf"
+        # Pastikan fallback cipher klasik tersedia
+        grep -q '^cipher ' "$conf" || sed -i '/^compress/a cipher AES-256-GCM' "$conf"
     done
 }
 
-# Penyesuaian layout Debian lama
 function ovpn_legacy_layout() {
+    # Layout lama (unit openvpn@, Debian <=10): unit membaca config dari
+    # /etc/openvpn/<nama>.conf, sedangkan vpn.zip menaruh config di
+    # /etc/openvpn/server/. Salin config ke lokasi datar dan buat symlink
+    # file data (sertifikat dll.) yang dirujuk config secara relatif.
     case "$OVPN_TCP_UNIT" in
         openvpn@*) ;;
         *) return 0 ;;
     esac
-
+    echo "Layout OpenVPN lama terdeteksi ($OVPN_TCP_UNIT): menyiapkan config datar di /etc/openvpn/..."
     local f name
-
     for f in ca.crt server.crt server.key dh2048.pem crl.pem tc.key ipp.txt; do
         if [ -e "/etc/openvpn/server/$f" ]; then
             ln -sf "/etc/openvpn/server/$f" "/etc/openvpn/$f"
         fi
     done
-
     for name in server-tcp server-udp; do
         if [ -f "/etc/openvpn/server/$name.conf" ]; then
             cp "/etc/openvpn/server/$name.conf" "/etc/openvpn/$name.conf"
@@ -127,52 +81,80 @@ function ovpn_legacy_layout() {
     done
 }
 
-ovpn_compat_config || exit 1
-ovpn_legacy_layout || exit 1
-
-# Instalasi plugin PAM
-mkdir -p /usr/lib/openvpn/
-
-PLUGIN_SOURCE=$(find /usr/lib -type f -name openvpn-plugin-auth-pam.so 2>/dev/null | head -n1)
-PLUGIN_DEST="/usr/lib/openvpn/openvpn-plugin-auth-pam.so"
-
-if [ -n "$PLUGIN_SOURCE" ]; then
-    cp "$PLUGIN_SOURCE" "$PLUGIN_DEST"
-    chmod 755 "$PLUGIN_DEST"
-    echo "Plugin PAM berhasil dipasang."
-else
-    echo "PERINGATAN: Plugin PAM tidak ditemukan."
-fi
-
-chmod 755 /usr/lib/openvpn/
-
-# Aktifkan service OpenVPN
-systemctl daemon-reload
-
-echo "Mengaktifkan OpenVPN TCP..."
-systemctl enable --now "$OVPN_TCP_UNIT" || {
-    echo "ERROR: Gagal menjalankan $OVPN_TCP_UNIT."
-    exit 1
+function ovpn_install() {
+    echo "Menginstal dan mengekstrak konfigurasi OpenVPN..."
+    rm -rf /etc/openvpn
+    mkdir -p /etc/openvpn
+    # Perbaiki URL dengan menambahkan https://
+    wget -O /etc/openvpn/vpn.zip "https://raw.githubusercontent.com/ajijainalganteng-wq/WendyVpn/refs/heads/main/ovpn/vpn.zip" >/dev/null 2>&1
+    unzip -d /etc/openvpn/ /etc/openvpn/vpn.zip
+    rm -f /etc/openvpn/vpn.zip
+    # Sesuaikan direktif cipher dengan versi OpenVPN terpasang (2.4 vs >=2.5)
+    ovpn_compat_config
+    # Siapkan layout config datar untuk unit lama openvpn@ (Debian <=10)
+    ovpn_legacy_layout
+    # Pastikan kepemilikan direktori easy-rsa benar
+    if [ -d "/etc/openvpn/server/easy-rsa/" ]; then
+        chown -R root:root /etc/openvpn/server/easy-rsa/
+        echo "Kepemilikan /etc/openvpn/server/easy-rsa/ diatur ke root:root."
+    else
+        echo "Peringatan: Direktori /etc/openvpn/server/easy-rsa/ tidak ditemukan."
+    fi
+    echo "Instalasi OpenVPN awal selesai."
 }
 
-echo "Mengaktifkan OpenVPN UDP..."
-systemctl enable --now "$OVPN_UDP_UNIT" || {
-    echo "ERROR: Gagal menjalankan $OVPN_UDP_UNIT."
-    exit 1
+function config_easy() {
+    echo "Mengkonfigurasi OpenVPN..."
+    cd
+    
+    # Buat direktori plugin jika belum ada dan salin plugin PAM dengan penanganan error
+    mkdir -p /usr/lib/openvpn/
+    ARCH_LIB=$(uname -m | sed 's/x86_64/x86_64-linux-gnu/;s/aarch64/aarch64-linux-gnu/;s/armv7l/arm-linux-gnueabihf/')
+    PLUGIN_SOURCE="/usr/lib/${ARCH_LIB}/openvpn/plugins/openvpn-plugin-auth-pam.so"
+    PLUGIN_DEST="/usr/lib/openvpn/openvpn-plugin-auth-pam.so"
+    if [[ -f "$PLUGIN_SOURCE" ]]; then
+        cp "$PLUGIN_SOURCE" "$PLUGIN_DEST"
+        echo "Plugin PAM disalin ke $PLUGIN_DEST"
+    else
+        echo "Peringatan: Plugin PAM tidak ditemukan di $PLUGIN_SOURCE. Pastikan paket openvpn-plugin-auth-pam telah diinstal dan path-nya benar."
+        # Catatan: Anda mungkin perlu menyesuaikan path dalam file konfigurasi .conf nanti jika penyalinan gagal
+    fi
+    chmod 755 /usr/lib/openvpn/ # Pastikan direktori dapat diakses
+    
+    # Aktifkan autostart (ini untuk konfigurasi lama, mungkin tidak diperlukan lagi)
+    sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
+    echo "Konfigurasi /etc/default/openvpn diperbarui."
+
+    # Aktifkan dan mulai instance server spesifik.
+    # Nama unit dipilih compat_openvpn_unit: openvpn-server@... untuk
+    # layout /etc/openvpn/server/, openvpn@... untuk layout datar lama.
+    echo "Mengaktifkan dan memulai layanan $OVPN_TCP_UNIT..."
+    systemctl enable --now "$OVPN_TCP_UNIT" || echo "Peringatan: Gagal mengaktifkan/memulai $OVPN_TCP_UNIT"
+
+    echo "Mengaktifkan dan memulai layanan $OVPN_UDP_UNIT..."
+    systemctl enable --now "$OVPN_UDP_UNIT" || echo "Peringatan: Gagal mengaktifkan/memulai $OVPN_UDP_UNIT"
+
+    # Merestart instance spesifik yang telah diaktifkan:
+    echo "Merestart layanan OpenVPN server..."
+    systemctl restart "$OVPN_TCP_UNIT" || echo "Peringatan: Gagal merestart $OVPN_TCP_UNIT"
+    systemctl restart "$OVPN_UDP_UNIT" || echo "Peringatan: Gagal merestart $OVPN_UDP_UNIT"
+
+    echo "Konfigurasi OpenVPN selesai."
 }
 
-# Aktifkan IP forwarding
-sysctl -w net.ipv4.ip_forward=1
+function make_follow() {
+    echo "Mengkonfigurasi IP forwarding dan file .ovpn..."
+    # Aktifkan IP forwarding
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
+    echo "IP forwarding diaktifkan."
 
-mkdir -p /etc/sysctl.d/
-echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-openvpn-forward.conf
-
-# Buat konfigurasi client TCP 1194
-cat > /etc/openvpn/tcp.ovpn <<-END
+    # Buat file konfigurasi client
+    cat > /etc/openvpn/tcp.ovpn <<-END
 client
 dev tun
 proto tcp
-remote $REMOTE_HOST 1194
+remote xxxxxxxxx 1194
 resolv-retry infinite
 route-method exe
 nobind
@@ -182,13 +164,13 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+    sed -i $MYIP2 /etc/openvpn/tcp.ovpn;
 
-# Buat konfigurasi client UDP 2200
-cat > /etc/openvpn/udp.ovpn <<-END
+    cat > /etc/openvpn/udp.ovpn <<-END
 client
 dev tun
 proto udp
-remote $REMOTE_HOST 2200
+remote xxxxxxxxx 2200
 resolv-retry infinite
 route-method exe
 nobind
@@ -198,13 +180,13 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+    sed -i $MYIP2 /etc/openvpn/udp.ovpn;
 
-# Buat konfigurasi client SSL 443
-cat > /etc/openvpn/ssl.ovpn <<-END
+    cat > /etc/openvpn/ws-ssl.ovpn <<-END
 client
 dev tun
 proto tcp
-remote $REMOTE_HOST 443
+remote xxxxxxxxx 443
 resolv-retry infinite
 route-method exe
 nobind
@@ -214,53 +196,97 @@ auth-user-pass
 comp-lzo
 verb 3
 END
+    sed -i $MYIP2 /etc/openvpn/ws-ssl.ovpn;
 
-# Tambahkan sertifikat CA
-CA_FILE="/etc/openvpn/server/ca.crt"
+    cat > /etc/openvpn/ssl.ovpn <<-END
+client
+dev tun
+proto tcp
+remote xxxxxxxxx 443
+resolv-retry infinite
+route-method exe
+nobind
+persist-key
+persist-tun
+auth-user-pass
+comp-lzo
+verb 3
+END
+    sed -i $MYIP2 /etc/openvpn/ssl.ovpn;
+    
+    echo "File konfigurasi client (.ovpn) dibuat."
+}
 
-if [ ! -f "$CA_FILE" ]; then
-    echo "ERROR: Sertifikat CA tidak ditemukan."
-    exit 1
-fi
+function cert_ovpn() {
+    echo "Menambahkan sertifikat CA ke file .ovpn dan membuat arsip..."
+    # Tambahkan CA cert ke file konfigurasi client
+    echo '<ca>' >> /etc/openvpn/tcp.ovpn
+    cat /etc/openvpn/server/ca.crt >> /etc/openvpn/tcp.ovpn
+    echo '</ca>' >> /etc/openvpn/tcp.ovpn
+    cp /etc/openvpn/tcp.ovpn /var/www/html/tcp.ovpn
 
-mkdir -p /home/vps/public_html/
+    echo '<ca>' >> /etc/openvpn/udp.ovpn
+    cat /etc/openvpn/server/ca.crt >> /etc/openvpn/udp.ovpn
+    echo '</ca>' >> /etc/openvpn/udp.ovpn
+    cp /etc/openvpn/udp.ovpn /var/www/html/udp.ovpn
 
-for name in tcp udp ssl; do
-    {
-        echo '<ca>'
-        cat "$CA_FILE"
-        echo '</ca>'
-    } >> "/etc/openvpn/$name.ovpn" || exit 1
+    echo '<ca>' >> /etc/openvpn/ws-ssl.ovpn
+    cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ws-ssl.ovpn
+    echo '</ca>' >> /etc/openvpn/ws-ssl.ovpn
+    cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
 
-    cp "/etc/openvpn/$name.ovpn" "/home/vps/public_html/$name.ovpn" || exit 1
-done
+    # PERBAIKI: Kesalahan ketik dan file yang salah disalin
+    # SALAH: echo '</ca>' >> /etc/openvpn/ssl.ovpn # Ini menutup tag yang tidak dibuka
+    # SALAH: cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ssl.ovpn # Ini menyalin ws-ssl.ovpn ke ssl.ovpn
+    # BENAR:
+    echo '<ca>' >> /etc/openvpn/ssl.ovpn # Buka tag <ca>
+    cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ssl.ovpn
+    echo '</ca>' >> /etc/openvpn/ssl.ovpn # Tutup tag <ca>
+    cp /etc/openvpn/ssl.ovpn /var/www/html/ssl.ovpn # Salin file ssl.ovpn yang benar
 
-# Firewall NAT
-echo "Mengkonfigurasi firewall OpenVPN..."
+    # Buat arsip ZIP
+    cd /var/www/html/
+    zip Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn > /dev/null 2>&1
+    cd
+    
+    # Buat halaman index.html
+    cat <<'mySiteOvpn' > /var/www/html/index.html
+<!DOCTYPE html>
+<html lang="en">
+<!-- Simple OVPN Download site -->
+<head><meta charset="utf-8" /><title>OVPN Config Download</title><meta name="description" content="Server" /><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport" /><meta name="theme-color" content="#000000" /><link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.8.2/css/all.css"><link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet"><link href="https://cdnjs.cloudflare.com/ajax/libs/mdbootstrap/4.8.3/css/mdb.min.css" rel="stylesheet"></head><body><div class="container justify-content-center" style="margin-top:9em;margin-bottom:5em;"><div class="col-md"><div class="view"><img src="https://openvpn.net/wp-content/uploads/openvpn.jpg" class="card-img-top"><div class="mask rgba-white-slight"></div></div><div class="card"><div class="card-body"><h5 class="card-title">Config List</h5><br /><ul class="list-group">
+<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>TCP <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/tcp.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
+<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>UDP <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/udp.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
+<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p>SSL <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/ssl.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
+<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p> WS SSL <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/ws-ssl.ovpn" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
+<li class="list-group-item justify-content-between align-items-center" style="margin-bottom:1em;"><p> ALL.zip <span class="badge light-blue darken-4">Android/iOS/PC/Modem</span><br /><small></small></p><a class="btn btn-outline-success waves-effect btn-sm" href="https://IP-ADDRESSS:81/Kyt-Project.zip" style="float:right;"><i class="fa fa-download"></i> Download</a></li>
+</ul></div></div></div></div></body></html>
+mySiteOvpn
+    # Ganti placeholder IP dengan IP publik aktual
+    sed -i "s|IP-ADDRESSS|$(curl -sS ifconfig.me)|g" /var/www/html/index.html
+    echo "Sertifikat ditambahkan ke file .ovpn, arsip dibuat, dan halaman index.html diperbarui."
+}
 
-for subnet in 10.6.0.0/24 10.7.0.0/24; do
-    iptables -t nat -C POSTROUTING -s "$subnet" -o "$ANU" -j MASQUERADE 2>/dev/null ||
-    iptables -t nat -A POSTROUTING -s "$subnet" -o "$ANU" -j MASQUERADE
-done
+function install_ovpn() {
+    echo "========== MENJALANKAN install_ovpn =========="
+    ovpn_install
+    config_easy
+    make_follow
+    # HAPUS baris berikut yang menyebabkan duplikasi:
+    # make_follow
+    cert_ovpn
 
-# Simpan aturan firewall
-mkdir -p /etc/iptables/
-iptables-save > /etc/iptables/rules.v4
+    # CATATAN: unit generik 'openvpn' sengaja TIDAK dipanggil — di sistem
+    # modern unit generik tidak mengelola instance server sama sekali
+    # (hanya menimbulkan peringatan). Instance dikelola lewat
+    # $OVPN_TCP_UNIT / $OVPN_UDP_UNIT hasil compat_openvpn_unit.
 
-netfilter-persistent save
-netfilter-persistent reload
+    # Restart layanan (seharusnya sudah dilakukan di config_easy, tapi tambahkan sebagai jaga-jaga)
+    echo "Merestart layanan OpenVPN untuk memastikan..."
+    systemctl restart "$OVPN_TCP_UNIT" || echo "Peringatan: Gagal merestart $OVPN_TCP_UNIT"
+    systemctl restart "$OVPN_UDP_UNIT" || echo "Peringatan: Gagal merestart $OVPN_UDP_UNIT"
+    echo "========== install_ovpn SELESAI =========="
+}
 
-# Periksa status OpenVPN
-echo "Memeriksa status OpenVPN..."
-
-systemctl is-active "$OVPN_TCP_UNIT"
-systemctl is-active "$OVPN_UDP_UNIT"
-
-echo "=========================================="
-echo "INSTALASI OPENVPN SELESAI"
-echo "=========================================="
-echo "TCP     : $REMOTE_HOST:1194"
-echo "UDP     : $REMOTE_HOST:2200"
-echo "SSL     : $REMOTE_HOST:443"
-echo "Download: /home/vps/public_html/"
-echo "=========================================="
+# Jalankan fungsi utama
+install_ovpn
