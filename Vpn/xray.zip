@@ -476,6 +476,9 @@ fi
 export JSON_PATH="/etc/xray"
 export DAT_PATH="/usr/local/share/xray"
 
+# Menyiapkan direktori aset Xray
+install -d -m 755 -o xray -g xray /usr/local/share/xray
+
 # Mengunduh installer resmi Xray
 XRAY_INSTALLER="/tmp/xray-install-release.sh"
 curl -fsSL -o "$XRAY_INSTALLER" https://github.com/XTLS/Xray-install/raw/main/install-release.sh || {
@@ -484,14 +487,7 @@ return 1
 }
 chmod 700 "$XRAY_INSTALLER"
 
-# Mengunduh dan memasang Xray Core versi stabil terbaru
-bash "$XRAY_INSTALLER" install --no-update-service --manually-restart-later || {
-print_error "Instalasi Xray Core gagal"
-rm -f "$XRAY_INSTALLER"
-return 1
-}
-
-# Memperbarui GeoIP Full dan GeoSite Expanded
+# Memperbarui GeoIP Full dan GeoSite Expanded terlebih dahulu
 print_install "Memperbarui GeoIP dan GeoSite"
 bash "$XRAY_INSTALLER" update-geodata || {
 print_error "Gagal memperbarui GeoIP dan GeoSite"
@@ -499,52 +495,23 @@ rm -f "$XRAY_INSTALLER"
 return 1
 }
 
-# Menghapus installer sementara
-rm -f "$XRAY_INSTALLER"
-
-# Memastikan binary Xray berhasil terpasang
-if [ ! -x /usr/local/bin/xray ]; then
-print_error "Binary Xray tidak ditemukan"
-return 1
-fi
-
-# Memastikan file GeoData tersedia dan tidak kosong
+# Memastikan GeoData berhasil dipasang
 if [ ! -s /usr/local/share/xray/geoip.dat ] || [ ! -s /usr/local/share/xray/geosite.dat ]; then
-print_error "File GeoIP atau GeoSite tidak ditemukan atau kosong"
+print_error "GeoIP atau GeoSite tidak ditemukan"
+rm -f "$XRAY_INSTALLER"
 return 1
 fi
 
-# Menyiapkan direktori aset Xray
-install -d -m 755 -o xray -g xray /usr/local/share/xray
+# Mengatur hak akses GeoData
 chown -R xray:xray /usr/local/share/xray
 chmod 755 /usr/local/share/xray
 chmod 644 /usr/local/share/xray/geoip.dat /usr/local/share/xray/geosite.dat
 
-# Memastikan Xray dapat membaca GeoData
-if ! runuser -u www-data -g xray -- test -r /usr/local/share/xray/geoip.dat || ! runuser -u www-data -g xray -- test -r /usr/local/share/xray/geosite.dat; then
-print_error "Xray tidak memiliki izin membaca GeoData"
-return 1
-fi
-
-wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
-domain=$(cat /etc/xray/domain)
-IPVS=$(cat /etc/xray/ipvps)
-print_success "Core Xray Latest Stable Version"
-clear
-print_install "Memasang Konfigurasi Packet"
-wget -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg" >/dev/null 2>&1
-wget -O /etc/nginx/conf.d/xray.conf "${REPO}Cfg/xray.conf" >/dev/null 2>&1
-sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
-sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
-curl ${REPO}Cfg/nginx.conf > /etc/nginx/nginx.conf
-cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
-chmod +x /etc/systemd/system/runn.service
-
-# Menghapus konfigurasi service bawaan installer agar tidak bertabrakan
+# Menghapus service bawaan dan drop-in lama
 rm -rf /etc/systemd/system/xray.service.d
 rm -rf /etc/systemd/system/xray@.service.d
 
-# Memperbaiki izin akses log Xray
+# Menyiapkan direktori log Xray
 mkdir -p /var/log/xray
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
@@ -552,6 +519,7 @@ chown -R www-data:xray /var/log/xray
 chmod 750 /var/log/xray
 chmod 660 /var/log/xray/access.log /var/log/xray/error.log
 
+# Membuat service Xray khusus sebelum instalasi Core
 cat << EOF > /etc/systemd/system/xray.service
 [Unit]
 Description=Xray Service
@@ -576,9 +544,54 @@ LimitNOFILE=1000000
 WantedBy=multi-user.target
 EOF
 
-# Memeriksa izin tulis log Xray
+# Memuat service khusus agar installer tidak membuat service bawaan
+systemctl daemon-reload
+
+# Mengunduh dan memasang Xray Core resmi tanpa menimpa GeoData
+print_install "Memasang Xray Core Latest Stable Version"
+bash "$XRAY_INSTALLER" install --no-update-service --without-geodata --manually-restart-later || {
+print_error "Instalasi Xray Core gagal"
+rm -f "$XRAY_INSTALLER"
+return 1
+}
+
+# Menghapus installer sementara
+rm -f "$XRAY_INSTALLER"
+
+# Memastikan binary Xray berhasil terpasang
+if [ ! -x /usr/local/bin/xray ]; then
+print_error "Binary Xray tidak ditemukan"
+return 1
+fi
+
+# Memastikan GeoData dapat dibaca oleh Xray
+if ! runuser -u www-data -g xray -- test -r /usr/local/share/xray/geoip.dat || ! runuser -u www-data -g xray -- test -r /usr/local/share/xray/geosite.dat; then
+print_error "Xray tidak memiliki izin membaca GeoData"
+return 1
+fi
+
+wget -O /etc/systemd/system/runn.service "${REPO}Fls/runn.service" >/dev/null 2>&1
+domain=$(cat /etc/xray/domain)
+IPVS=$(cat /etc/xray/ipvps)
+print_success "Core Xray Latest Stable Version"
+clear
+print_install "Memasang Konfigurasi Packet"
+wget -O /etc/haproxy/haproxy.cfg "${REPO}Cfg/haproxy.cfg" >/dev/null 2>&1
+wget -O /etc/nginx/conf.d/xray.conf "${REPO}Cfg/xray.conf" >/dev/null 2>&1
+sed -i "s/xxx/${domain}/g" /etc/haproxy/haproxy.cfg
+sed -i "s/xxx/${domain}/g" /etc/nginx/conf.d/xray.conf
+curl ${REPO}Cfg/nginx.conf > /etc/nginx/nginx.conf
+cat /etc/xray/xray.crt /etc/xray/xray.key | tee /etc/haproxy/hap.pem
+chmod +x /etc/systemd/system/runn.service
+
+# Memastikan izin akses log Xray
+chown -R www-data:xray /var/log/xray
+chmod 750 /var/log/xray
+chmod 660 /var/log/xray/access.log /var/log/xray/error.log
+
+# Memeriksa izin tulis log
 if ! runuser -u www-data -g xray -- test -w /var/log/xray/access.log || ! runuser -u www-data -g xray -- test -w /var/log/xray/error.log; then
-print_error "Xray tidak memiliki izin menulis file log"
+print_error "Xray tidak memiliki izin menulis log"
 return 1
 fi
 
