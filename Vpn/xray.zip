@@ -485,7 +485,7 @@ return 1
 chmod 700 "$XRAY_INSTALLER"
 
 # Mengunduh dan memasang Xray Core versi stabil terbaru
-bash "$XRAY_INSTALLER" install -u www-data --manually-restart-later || {
+bash "$XRAY_INSTALLER" install --no-update-service --manually-restart-later || {
 print_error "Instalasi Xray Core gagal"
 rm -f "$XRAY_INSTALLER"
 return 1
@@ -502,15 +502,15 @@ return 1
 # Menghapus installer sementara
 rm -f "$XRAY_INSTALLER"
 
-# Memastikan file GeoData tersedia dan tidak kosong
-if [ ! -s /usr/local/share/xray/geoip.dat ] || [ ! -s /usr/local/share/xray/geosite.dat ]; then
-print_error "File GeoIP atau GeoSite tidak ditemukan atau kosong"
-return 1
-fi
-
 # Memastikan binary Xray berhasil terpasang
 if [ ! -x /usr/local/bin/xray ]; then
 print_error "Binary Xray tidak ditemukan"
+return 1
+fi
+
+# Memastikan file GeoData tersedia dan tidak kosong
+if [ ! -s /usr/local/share/xray/geoip.dat ] || [ ! -s /usr/local/share/xray/geosite.dat ]; then
+print_error "File GeoIP atau GeoSite tidak ditemukan atau kosong"
 return 1
 fi
 
@@ -548,9 +548,9 @@ rm -rf /etc/systemd/system/xray@.service.d
 mkdir -p /var/log/xray
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
-chown -R www-data:www-data /var/log/xray
-chmod 755 /var/log/xray
-chmod 644 /var/log/xray/access.log /var/log/xray/error.log
+chown -R www-data:xray /var/log/xray
+chmod 750 /var/log/xray
+chmod 660 /var/log/xray/access.log /var/log/xray/error.log
 
 cat << EOF > /etc/systemd/system/xray.service
 [Unit]
@@ -575,6 +575,12 @@ LimitNOFILE=1000000
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Memeriksa izin tulis log Xray
+if ! runuser -u www-data -g xray -- test -w /var/log/xray/access.log || ! runuser -u www-data -g xray -- test -w /var/log/xray/error.log; then
+print_error "Xray tidak memiliki izin menulis file log"
+return 1
+fi
 
 # Memeriksa konfigurasi Xray sebelum menjalankan service
 print_install "Memeriksa Konfigurasi Xray"
