@@ -23,57 +23,38 @@ wget -O dropbear-2019.78.tar.bz2 https://matt.ucc.asn.au/dropbear/releases/dropb
 tar -xjf dropbear-2019.78.tar.bz2
 cd /usr/local/src/dropbear-2019.78
 
+
 # BUILD
-./configure --prefix=/usr/local
+./configure
 make -j"$(nproc)"
 
-# Pastikan hasil build server tersedia sebelum instalasi
-if [ ! -s ./dropbear ]; then
-    echo "[ERROR] Hasil kompilasi ./dropbear tidak ditemukan." >&2
-    exit 1
-fi
+# INSTALL DROPBEAR BINARY
+mkdir -p /usr/local/sbin
+install -m 0755 ./dropbear /usr/local/sbin/dropbear
 
-# INSTALL BINARY SECARA EKSPLISIT KE PATH SERVICE
-install -d -m 0755 /usr/local/sbin /usr/local/bin
-cp -f ./dropbear /usr/local/sbin/dropbear
-chmod 0755 /usr/local/sbin/dropbear
-
-# Install utilitas Dropbear
-if [ -s ./dropbearkey ]; then
-    cp -f ./dropbearkey /usr/local/bin/dropbearkey
-    chmod 0755 /usr/local/bin/dropbearkey
-fi
-
-# Validasi binary; jangan lanjut jika target tidak ada/tidak executable
-if [ ! -x /usr/local/sbin/dropbear ]; then
-    echo "[ERROR] Binary gagal dipasang ke /usr/local/sbin/dropbear." >&2
-    ls -lah /usr/local/src/dropbear-2019.78/dropbear /usr/local/sbin/ >&2 || true
-    exit 1
-fi
-if [ ! -x /usr/local/bin/dropbearkey ]; then
-    echo "[ERROR] dropbearkey tidak tersedia di /usr/local/bin/dropbearkey." >&2
-    exit 1
-fi
-
-# SYMLINK KOMPATIBILITAS UNTUK SCRIPT LAMA
+# SYMLINK
 ln -sfn /usr/local/sbin/dropbear /usr/sbin/dropbear
 
-# HOST KEY: PERTAHANKAN KEY YANG SUDAH ADA
-install -d -m 0700 /etc/dropbear
-if [ ! -s /etc/dropbear/dropbear_rsa_host_key ]; then
-    /usr/local/bin/dropbearkey -t rsa -s 3072 -f /etc/dropbear/dropbear_rsa_host_key
+# INSTALL DROPBEARKEY
+if [ -x ./dropbearkey ]; then
+    install -m 0755 ./dropbearkey /usr/local/bin/dropbearkey
 fi
+
+# HOSTKEY
+mkdir -p /etc/dropbear
+
+if [ ! -s /etc/dropbear/dropbear_rsa_host_key ]; then
+    /usr/local/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+fi
+
 if [ ! -s /etc/dropbear/dropbear_ecdsa_host_key ]; then
     /usr/local/bin/dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
 fi
-chmod 0600 /etc/dropbear/dropbear_rsa_host_key /etc/dropbear/dropbear_ecdsa_host_key
 
-# BANNER
-if [ ! -f /etc/banner.txt ]; then
-    install -m 0644 /dev/null /etc/banner.txt
-fi
+chmod 600 /etc/dropbear/dropbear_*_host_key
+touch /etc/banner.txt
 
-# SERVICE: TENTUKAN HOST KEY RSA + ECDSA SECARA EKSPLISIT
+# SERVICE
 cat > /etc/systemd/system/dropbear.service <<'EOL'
 [Unit]
 Description=Dropbear SSH Server (2019)
@@ -81,41 +62,39 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
-Restart=on-failure
+ExecStart=/usr/local/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt
+Restart=always
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOL
 
-# VALIDASI TERAKHIR SEBELUM SYSTEMD START
-/usr/local/sbin/dropbear -V
-
-# ENABLE + START
+# ENABLE AND START
 systemctl daemon-reload
-systemctl reset-failed dropbear 2>/dev/null || true
 systemctl enable dropbear
+systemctl reset-failed dropbear 2>/dev/null || true
 systemctl restart dropbear
 
+# CHECK
 sleep 2
-echo ""
-echo "=== STATUS ==="
-systemctl status dropbear --no-pager -l || true
 
-if ! systemctl is-active --quiet dropbear; then
-    echo "[ERROR] Dropbear belum aktif. Log terakhir:" >&2
-    journalctl -u dropbear -n 40 --no-pager >&2
+if systemctl is-active --quiet dropbear; then
+    echo "DROPBEAR BERHASIL DIINSTALL DAN RUNNING"
+else
+    echo "DROPBEAR GAGAL RUNNING"
+    journalctl -u dropbear -n 30 --no-pager
     exit 1
 fi
 
 echo ""
-echo "=== LISTEN PORT ==="
-ss -lntp | grep -E ':(109|143)\\b' || true
+echo "===== DROPBEAR STATUS ====="
+systemctl status dropbear --no-pager -l
 
 echo ""
-echo "=== BINARY ==="
-ls -lh /usr/local/sbin/dropbear /usr/local/bin/dropbearkey
+echo "===== DROPBEAR PORT ====="
+ss -tulpn | grep dropbear || true
 
 echo ""
-echo "=== DONE: DROPBEAR ACTIVE ==="
+echo "===== DROPBEAR VERSION ====="
+/usr/local/sbin/dropbear -V
