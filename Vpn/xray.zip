@@ -251,14 +251,13 @@ fi
 }
 clear
 print_install "Membuat direktori xray"
-mkdir -p /etc/xray
-curl -s ifconfig.me > /etc/xray/ipvps
+# Menyiapkan direktori log Xray
 mkdir -p /var/log/xray
-chown www-data.www-data /var/log/xray
-chmod 755 /var/log/xray
 touch /var/log/xray/access.log
 touch /var/log/xray/error.log
-chown www-data.www-data /var/log/xray/access.log /var/log/xray/error.log
+chown -R www-data:xray /var/log/xray
+chmod 750 /var/log/xray
+chmod 660 /var/log/xray/access.log /var/log/xray/error.log
 mkdir -p /var/lib/kyt >/dev/null 2>&1
 while IFS=":" read -r a b; do
 case $a in
