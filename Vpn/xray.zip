@@ -510,15 +510,6 @@ chmod 644 /usr/local/share/xray/geoip.dat /usr/local/share/xray/geosite.dat
 # Menghapus service bawaan dan drop-in lama
 rm -rf /etc/systemd/system/xray.service.d
 rm -rf /etc/systemd/system/xray@.service.d
-
-# Menyiapkan direktori log Xray
-mkdir -p /var/log/xray
-touch /var/log/xray/access.log
-touch /var/log/xray/error.log
-chown -R www-data:xray /var/log/xray
-chmod 750 /var/log/xray
-chmod 660 /var/log/xray/access.log /var/log/xray/error.log
-
 # Membuat service Xray khusus sebelum instalasi Core
 cat << EOF > /etc/systemd/system/xray.service
 [Unit]
