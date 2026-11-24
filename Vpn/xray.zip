@@ -660,7 +660,6 @@ chmod +x /etc/default/dropbear
 wget -q -O /root/dropbear2019.sh "${REPO}Cfg/dropbear2019.sh"
 chmod +x /root/dropbear2019.sh
 bash /root/dropbear2019.sh
-/etc/init.d/dropbear restart
 /etc/init.d/dropbear status
 print_success "Dropbear"
 }
@@ -873,7 +872,6 @@ clear
 print_install "Restarting  All Packet"
 /etc/init.d/nginx restart
 /etc/init.d/ssh restart
-/etc/init.d/dropbear restart
 /etc/init.d/fail2ban restart
 /etc/init.d/vnstat restart
 systemctl restart haproxy
