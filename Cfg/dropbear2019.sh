@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # install_dropbear2019.sh
 # Dropbear 2019.78 - Source Build + Custom Systemd Service
