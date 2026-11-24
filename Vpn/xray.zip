@@ -873,6 +873,7 @@ clear
 print_install "Restarting  All Packet"
 /etc/init.d/nginx restart
 /etc/init.d/ssh restart
+/etc/init.d/dropbear restart
 /etc/init.d/fail2ban restart
 /etc/init.d/vnstat restart
 systemctl restart haproxy
@@ -883,6 +884,7 @@ systemctl start netfilter-persistent
 systemctl enable --now nginx
 systemctl enable --now xray
 systemctl enable --now rc-local
+systemctl enable --now dropbear
 systemctl enable --now cron
 systemctl enable --now haproxy
 systemctl enable --now netfilter-persistent
