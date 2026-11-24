@@ -870,6 +870,7 @@ print_success "UDP-CUSTOM BY ARISCTUNNEL V4"
 function ins_restart(){
 clear
 print_install "Restarting  All Packet"
+apt-get install -y netfilter-persistent iptables-persistent
 /etc/init.d/nginx restart
 /etc/init.d/ssh restart
 /etc/init.d/dropbear restart
