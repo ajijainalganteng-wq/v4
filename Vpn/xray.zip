@@ -651,46 +651,18 @@ print_success "SSHD"
 }
 clear
 function ins_dropbear(){
-    clear
-    print_install "Menginstall Dropbear 2019"
-
-    # DOWNLOAD INSTALLER DROPBEAR 2019
-    wget -q -O /root/dropbear2019.sh "${REPO}Cfg/dropbear2019.sh" || {
-        echo "Gagal mengunduh installer Dropbear 2019!"
-        return 1
-    }
-
-    chmod +x /root/dropbear2019.sh
-
-    # INSTALL DROPBEAR 2019
-    bash /root/dropbear2019.sh || {
-        echo "Instalasi Dropbear 2019 gagal!"
-        return 1
-    }
-
-    print_install "Menginstall Konfigurasi Dropbear"
-
-    # DOWNLOAD CONFIGURATION DROPBEAR
-    wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear" || {
-        echo "Gagal mengunduh konfigurasi Dropbear!"
-        return 1
-    }
-
-    chmod 644 /etc/default/dropbear
-
-    # RESTART SERVICE
-    systemctl daemon-reload
-    systemctl restart dropbear
-
-    # VERIFY SERVICE
-    sleep 2
-    if systemctl is-active --quiet dropbear; then
-        print_success "Dropbear"
-    else
-        echo "Dropbear gagal berjalan!"
-        journalctl -u dropbear -n 30 --no-pager
-        return 1
-    fi
+clear
+print_install "Menginstall Dropbear"
+apt-get install dropbear -y > /dev/null 2>&1
+wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+chmod +x /etc/default/dropbear
+# Download dan jalankan installer Dropbear 2019.78
+wget -q -O /root/dropbear2019.sh "${REPO}Cfg/dropbear2019.sh"
+chmod +x /root/dropbear2019.sh
+bash /root/dropbear2019.sh
+/etc/init.d/dropbear restart
+/etc/init.d/dropbear status
+print_success "Dropbear"
 }
 clear
 function ins_vnstat(){
