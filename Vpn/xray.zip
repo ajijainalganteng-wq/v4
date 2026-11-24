@@ -882,7 +882,6 @@ systemctl start netfilter-persistent
 systemctl enable --now nginx
 systemctl enable --now xray
 systemctl enable --now rc-local
-systemctl enable --now dropbear
 systemctl enable --now cron
 systemctl enable --now haproxy
 systemctl enable --now netfilter-persistent
