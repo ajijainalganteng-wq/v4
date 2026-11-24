@@ -54,30 +54,25 @@ if [ ! -f ./dropbear ]; then
 fi
 
 # INSTALL DROPBEAR BINARY
-echo "=== INSTALL DROPBEAR BINARY ==="
-
 mkdir -p /usr/local/sbin
 
-# Pasang melalui file sementara agar tidak terjadi
-# kesalahan apabila target sebelumnya bermasalah.
-rm -f /usr/local/sbin/dropbear.new
-
-install -m 0755 ./dropbear /usr/local/sbin/dropbear.new
-
-# Pastikan binary sementara valid
-if [ ! -s /usr/local/sbin/dropbear.new ]; then
-    echo "[ERROR] Binary Dropbear gagal disalin!"
+if [ ! -s ./dropbear ]; then
+    echo "[ERROR] Binary hasil build tidak ditemukan!"
     exit 1
 fi
 
-chmod 0755 /usr/local/sbin/dropbear.new
+install -m 0755 ./dropbear /usr/local/sbin/dropbear
 
-# Ganti binary lama dengan binary baru
-mv -f /usr/local/sbin/dropbear.new /usr/local/sbin/dropbear
+# VERIFY INSTALLATION
+if [ ! -x /usr/local/sbin/dropbear ]; then
+    echo "[ERROR] Instalasi binary gagal!"
+    exit 1
+fi
 
 # SYMLINK
 ln -sfn /usr/local/sbin/dropbear /usr/sbin/dropbear
 
+echo "[OK] Binary Dropbear berhasil dipasang"
 # VERIFY INSTALLED BINARY
 if [ ! -f /usr/local/sbin/dropbear ] || [ ! -x /usr/local/sbin/dropbear ]; then
     echo "[ERROR] Binary Dropbear tidak valid!"
