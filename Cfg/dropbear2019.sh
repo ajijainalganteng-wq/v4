@@ -1,170 +1,183 @@
+
 #!/bin/bash
+# install_dropbear2019.sh
+# Dropbear 2019.78 - Source Build + Custom Systemd Service
+
 set -Eeuo pipefail
 
-trap 'echo "[ERROR] Instalasi gagal pada baris ${LINENO}. Periksa pesan di atas." >&2' ERR
+VERSION="2019.78"
+URL="https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_${VERSION}.tar.gz"
 
-echo "=== INSTALL DROPBEAR 2019.78 ==="
-
-# ROOT CHECK
-if [ "$(id -u)" -ne 0 ]; then
-    echo "[ERROR] Jalankan script sebagai root!"
-    exit 1
-fi
-
-# STOP DROPBEAR LAMA (TIDAK MENGHAPUS OPENSSH)
+echo "[Dropbear] Menghentikan service lama..."
 systemctl stop dropbear 2>/dev/null || true
-systemctl disable dropbear 2>/dev/null || true
 
-apt-get purge -y dropbear 2>/dev/null || true
-apt-get remove -y dropbear 2>/dev/null || true
+echo "[Dropbear] Menginstal dependensi..."
+apt-get update -y || true
+apt-get install -y build-essential zlib1g-dev libtomcrypt-dev \
+    libtommath-dev wget ca-certificates autoconf openssh-client
 
-# DEPENDENCY
-apt-get update -y
+apt-get install -y libcrypt-dev 2>/dev/null || \
+apt-get install -y libxcrypt-dev 2>/dev/null || true
 
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    build-essential \
-    zlib1g-dev \
-    wget \
-    ca-certificates \
-    file
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-# DOWNLOAD SOURCE
-mkdir -p /usr/local/src
-cd /usr/local/src
+cd "$TMPDIR"
 
-rm -rf dropbear-2019.78 dropbear-2019.78.tar.bz2
+echo "[Dropbear] Download source ${VERSION}..."
 
-wget -O dropbear-2019.78.tar.bz2 \
-    https://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2
+DL_OK=0
+for i in 1 2 3; do
+    if wget --timeout=30 --tries=2 -q "$URL" -O dropbear.tar.gz &&
+       tar tzf dropbear.tar.gz >/dev/null 2>&1; then
+        DL_OK=1
+        break
+    fi
+    sleep 5
+done
 
-tar -xjf dropbear-2019.78.tar.bz2
-
-cd /usr/local/src/dropbear-2019.78
-
-# BUILD
-echo "=== BUILD DROPBEAR ==="
-
-./configure
-make -j"$(nproc)"
-
-# VERIFY BUILD
-if [ ! -f ./dropbear ]; then
-    echo "[ERROR] Binary hasil kompilasi tidak ditemukan!"
+[ "$DL_OK" = 1 ] || {
+    echo "[ERROR] Gagal mengunduh source Dropbear."
     exit 1
+}
+
+tar xzf dropbear.tar.gz
+cd "dropbear-DROPBEAR_${VERSION}"
+
+# Generate configure files jika belum tersedia
+if [ ! -f configure ]; then
+    autoconf
 fi
 
-# INSTALL DROPBEAR BINARY
-mkdir -p /usr/local/sbin
-
-if [ ! -s ./dropbear ]; then
-    echo "[ERROR] Binary hasil build tidak ditemukan!"
-    exit 1
+if [ ! -f config.h.in ]; then
+    autoheader
 fi
 
-install -m 0755 ./dropbear /usr/local/sbin/dropbear
+echo "[Dropbear] Mengaktifkan algoritma legacy..."
 
-# VERIFY INSTALLATION
-if [ ! -x /usr/local/sbin/dropbear ]; then
-    echo "[ERROR] Instalasi binary gagal!"
-    exit 1
+sed -i 's/^#define DROPBEAR_ENABLE_CBC_MODE 0/#define DROPBEAR_ENABLE_CBC_MODE 1/' default_options.h
+sed -i 's/^#define DROPBEAR_3DES 0/#define DROPBEAR_3DES 1/' default_options.h
+sed -i 's/^#define DROPBEAR_SHA1_96_HMAC 0/#define DROPBEAR_SHA1_96_HMAC 1/' default_options.h
+sed -i 's/^#define DROPBEAR_DH_GROUP1_CLIENTONLY 1/#define DROPBEAR_DH_GROUP1_CLIENTONLY 0/' default_options.h
+
+echo "[Dropbear] Build source..."
+
+if ! ./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1 ||
+   ! make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1; then
+
+    echo "[Dropbear] Mencoba bundled libtom..."
+
+    make distclean >/dev/null 2>&1 || true
+
+    ./configure --prefix=/usr --sysconfdir=/etc \
+        --disable-pam --enable-bundled-libtom
+
+    make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert"
 fi
 
-# SYMLINK
-ln -sfn /usr/local/sbin/dropbear /usr/sbin/dropbear
+echo "[Dropbear] Memasang binary..."
 
-echo "[OK] Binary Dropbear berhasil dipasang"
-# VERIFY INSTALLED BINARY
-if [ ! -f /usr/local/sbin/dropbear ] || [ ! -x /usr/local/sbin/dropbear ]; then
-    echo "[ERROR] Binary Dropbear tidak valid!"
-    exit 1
-fi
+install -D -m 0755 dropbear /usr/sbin/dropbear
+install -D -m 0755 dropbearkey /usr/sbin/dropbearkey
+install -D -m 0755 dropbearconvert /usr/sbin/dropbearconvert
 
-if ! /usr/local/sbin/dropbear -V; then
-    echo "[ERROR] Binary Dropbear tidak dapat dieksekusi!"
-    exit 1
-fi
+# Pastikan binary tersedia
+test -x /usr/sbin/dropbear
+test -x /usr/sbin/dropbearkey
 
-echo "[OK] Binary Dropbear berhasil dipasang"
+echo "[Dropbear] Membuat host key..."
 
-# INSTALL DROPBEARKEY
-if [ -x ./dropbearkey ]; then
-    install -D -m 0755 ./dropbearkey /usr/local/bin/dropbearkey
-fi
-
-if [ ! -x /usr/local/bin/dropbearkey ]; then
-    echo "[ERROR] Dropbearkey tidak ditemukan!"
-    exit 1
-fi
-
-# HOSTKEY
 mkdir -p /etc/dropbear
 
-if [ ! -s /etc/dropbear/dropbear_rsa_host_key ]; then
-    /usr/local/bin/dropbearkey \
-        -t rsa \
-        -f /etc/dropbear/dropbear_rsa_host_key
-fi
+[ -s /etc/dropbear/dropbear_rsa_host_key ] ||
+    /usr/sbin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
 
-if [ ! -s /etc/dropbear/dropbear_ecdsa_host_key ]; then
-    /usr/local/bin/dropbearkey \
-        -t ecdsa \
-        -f /etc/dropbear/dropbear_ecdsa_host_key
-fi
+[ -s /etc/dropbear/dropbear_ecdsa_host_key ] ||
+    /usr/sbin/dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
+
+[ -s /etc/dropbear/dropbear_dss_host_key ] ||
+    /usr/sbin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 
 chmod 600 /etc/dropbear/dropbear_*_host_key
 
-# BANNER
+# Jangan menimpa banner yang sudah dibuat pengguna
 touch /etc/banner.txt
 
-# SERVICE
-cat > /etc/systemd/system/dropbear.service <<'EOL'
+echo "[Dropbear] Menyinkronkan konfigurasi..."
+
+cat > /etc/default/dropbear <<'EOF'
+NO_START=0
+DROPBEAR_PORT=143
+DROPBEAR_EXTRA_ARGS="-p 109 -W 65536 -I 60 -b /etc/banner.txt"
+DROPBEAR_BANNER="/etc/banner.txt"
+DROPBEAR_RECEIVE_WINDOW=65536
+EOF
+
+chmod 644 /etc/default/dropbear
+
+echo "[Dropbear] Membuat systemd service..."
+
+cat > /etc/systemd/system/dropbear.service <<'EOF'
 [Unit]
-Description=Dropbear SSH Server (2019)
+Description=Dropbear SSH Server 2019.78
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt
-Restart=always
+ExecStart=/usr/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -r /etc/dropbear/dropbear_dss_host_key
+Restart=on-failure
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
-EOL
+EOF
 
-# VERIFY SERVICE EXECUTABLE
-if [ ! -x /usr/local/sbin/dropbear ]; then
-    echo "[ERROR] ExecStart binary tidak tersedia!"
-    exit 1
-fi
+echo "[Dropbear] Mencegah apt menimpa paket..."
 
-# ENABLE AND START
-echo "=== START DROPBEAR SERVICE ==="
+apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
+
+echo "[Dropbear] Mengaktifkan service..."
 
 systemctl daemon-reload
-systemctl enable dropbear
-
 systemctl reset-failed dropbear 2>/dev/null || true
+systemctl enable dropbear
 systemctl restart dropbear
 
-# CHECK
 sleep 2
 
-if systemctl is-active --quiet dropbear; then
-    echo ""
-    echo "=================================="
-    echo " DROPBEAR BERHASIL RUNNING"
-    echo "=================================="
-else
-    echo ""
-    echo "[ERROR] DROPBEAR GAGAL RUNNING"
+echo "[Dropbear] Memeriksa service..."
+
+if ! systemctl is-active --quiet dropbear; then
+    echo "[ERROR] Dropbear gagal berjalan!"
     journalctl -u dropbear -n 40 --no-pager
     exit 1
 fi
 
-# STATUS
+echo "[Dropbear] Memeriksa banner..."
+
+BANNER=$(timeout 5 bash -c \
+    'exec 3<>/dev/tcp/127.0.0.1/143; head -n 1 <&3' \
+    2>/dev/null || true)
+
+echo "Banner: $BANNER"
+
+case "$BANNER" in
+    *dropbear_2019.78*)
+        echo "[OK] Dropbear 2019.78 aktif."
+        ;;
+    *)
+        echo "[ERROR] Banner versi tidak sesuai!"
+        journalctl -u dropbear -n 30 --no-pager
+        exit 1
+        ;;
+esac
+
 echo ""
-echo "===== DROPBEAR STATUS ====="
+echo "===== DROPBEAR VERSION ====="
+/usr/sbin/dropbear -V
+
+echo ""
+echo "===== DROPBEAR SERVICE ====="
 systemctl status dropbear --no-pager -l
 
 echo ""
@@ -172,8 +185,4 @@ echo "===== DROPBEAR PORT ====="
 ss -tulpn | grep dropbear || true
 
 echo ""
-echo "===== DROPBEAR VERSION ====="
-/usr/local/sbin/dropbear -V
-
-echo ""
-echo "=== INSTALLATION COMPLETE ==="
+echo "[SUCCESS] Instalasi Dropbear 2019.78 selesai."
