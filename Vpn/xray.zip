@@ -651,11 +651,37 @@ print_success "SSHD"
 }
 clear
 function ins_dropbear(){
-clear
-print_install "Menginstall Dropbear"
-wget ${REPO}Cfg/dropbear &&  chmod +x dropbear && ./dropbear
-wget ${REPO}Cfg/dropbear2019.sh &&  chmod +x dropbear2019.sh && ./dropbear2019.sh
-print_success "Dropbear"
+    clear
+    print_install "Menginstall Dropbear"
+
+    # DOWNLOAD CONFIGURATION
+    wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear" || {
+        echo "Gagal mengunduh konfigurasi Dropbear!"
+        return 1
+    }
+    chmod 644 /etc/default/dropbear
+
+    # DOWNLOAD INSTALLER
+    wget -q -O /root/dropbear2019.sh "${REPO}Cfg/dropbear2019.sh" || {
+        echo "Gagal mengunduh installer Dropbear!"
+        return 1
+    }
+    chmod +x /root/dropbear2019.sh
+
+    # RUN INSTALLER
+    bash /root/dropbear2019.sh || {
+        echo "Instalasi Dropbear gagal!"
+        return 1
+    }
+
+    # VERIFY SERVICE
+    if systemctl is-active --quiet dropbear; then
+        print_success "Dropbear"
+    else
+        echo "Dropbear gagal berjalan!"
+        journalctl -u dropbear -n 30 --no-pager
+        return 1
+    fi
 }
 clear
 function ins_vnstat(){
