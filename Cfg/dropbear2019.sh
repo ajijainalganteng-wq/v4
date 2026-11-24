@@ -1,6 +1,7 @@
 #!/bin/bash
 # install_dropbear2019.sh
 # Dropbear 2019.78 - Source Build + Custom Systemd Service
+# Synced with OpenVPN TCP/UDP services
 
 set -Eeuo pipefail
 
@@ -114,18 +115,24 @@ EOF
 
 chmod 644 /etc/default/dropbear
 
+# =========================================================
+# SYSTEMD SERVICE - SINKRON DENGAN OPENVPN
+# =========================================================
+
 echo "[Dropbear] Membuat systemd service..."
 
 cat > /etc/systemd/system/dropbear.service <<'EOF'
 [Unit]
 Description=Dropbear SSH Server 2019.78
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 ExecStart=/usr/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -r /etc/dropbear/dropbear_dss_host_key
 Restart=on-failure
 RestartSec=3
+StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
@@ -135,19 +142,36 @@ echo "[Dropbear] Mencegah apt menimpa paket..."
 
 apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
 
+# =========================================================
+# ENABLE + RESTART DROPBEAR
+# =========================================================
+
 echo "[Dropbear] Mengaktifkan service..."
 
 systemctl daemon-reload
 systemctl reset-failed dropbear 2>/dev/null || true
 systemctl enable dropbear
-systemctl restart dropbear
 
-sleep 2
+if ! systemctl restart dropbear; then
+    echo "[ERROR] Restart Dropbear gagal!"
+    journalctl -u dropbear -n 40 --no-pager
+    exit 1
+fi
 
-echo "[Dropbear] Memeriksa service..."
+# Tunggu service aktif
+RUNNING=0
 
-if ! systemctl is-active --quiet dropbear; then
-    echo "[ERROR] Dropbear gagal berjalan!"
+for i in $(seq 1 15); do
+    if systemctl is-active --quiet dropbear; then
+        RUNNING=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$RUNNING" -ne 1 ]; then
+    echo "[ERROR] Dropbear gagal running!"
+    systemctl status dropbear --no-pager -l || true
     journalctl -u dropbear -n 40 --no-pager
     exit 1
 fi
@@ -171,6 +195,10 @@ case "$BANNER" in
         ;;
 esac
 
+# =========================================================
+# FINAL STATUS
+# =========================================================
+
 echo ""
 echo "===== DROPBEAR VERSION ====="
 /usr/sbin/dropbear -V
@@ -184,4 +212,18 @@ echo "===== DROPBEAR PORT ====="
 ss -tulpn | grep dropbear || true
 
 echo ""
-echo "[SUCCESS] Instalasi Dropbear 2019.78 selesai."
+echo "===== OPENVPN SERVICE CHECK ====="
+
+for SERVICE in \
+    openvpn-server@server-tcp \
+    openvpn-server@server-udp
+do
+    if systemctl is-active --quiet "$SERVICE"; then
+        echo "[OK] $SERVICE RUNNING"
+    else
+        echo "[INFO] $SERVICE belum aktif atau belum terpasang."
+    fi
+done
+
+echo ""
+echo "[SUCCESS] Dropbear 2019.78 selesai disinkronkan."
