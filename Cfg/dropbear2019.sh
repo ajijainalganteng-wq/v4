@@ -5,53 +5,120 @@ trap 'echo "[ERROR] Instalasi gagal pada baris ${LINENO}. Periksa pesan di atas.
 
 echo "=== INSTALL DROPBEAR 2019.78 ==="
 
+# ROOT CHECK
+if [ "$(id -u)" -ne 0 ]; then
+    echo "[ERROR] Jalankan script sebagai root!"
+    exit 1
+fi
+
 # STOP DROPBEAR LAMA (TIDAK MENGHAPUS OPENSSH)
 systemctl stop dropbear 2>/dev/null || true
 systemctl disable dropbear 2>/dev/null || true
+
 apt-get purge -y dropbear 2>/dev/null || true
 apt-get remove -y dropbear 2>/dev/null || true
 
 # DEPENDENCY
 apt-get update -y
-DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential zlib1g-dev wget ca-certificates
+
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    build-essential \
+    zlib1g-dev \
+    wget \
+    ca-certificates \
+    file
 
 # DOWNLOAD SOURCE
 mkdir -p /usr/local/src
 cd /usr/local/src
+
 rm -rf dropbear-2019.78 dropbear-2019.78.tar.bz2
-wget -O dropbear-2019.78.tar.bz2 https://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2
+
+wget -O dropbear-2019.78.tar.bz2 \
+    https://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2
+
 tar -xjf dropbear-2019.78.tar.bz2
+
 cd /usr/local/src/dropbear-2019.78
 
-
 # BUILD
+echo "=== BUILD DROPBEAR ==="
+
 ./configure
 make -j"$(nproc)"
 
+# VERIFY BUILD
+if [ ! -f ./dropbear ]; then
+    echo "[ERROR] Binary hasil kompilasi tidak ditemukan!"
+    exit 1
+fi
+
 # INSTALL DROPBEAR BINARY
+echo "=== INSTALL DROPBEAR BINARY ==="
+
 mkdir -p /usr/local/sbin
-install -m 0755 ./dropbear /usr/local/sbin/dropbear
+
+# Pasang melalui file sementara agar tidak terjadi
+# kesalahan apabila target sebelumnya bermasalah.
+rm -f /usr/local/sbin/dropbear.new
+
+install -m 0755 ./dropbear /usr/local/sbin/dropbear.new
+
+# Pastikan binary sementara valid
+if [ ! -s /usr/local/sbin/dropbear.new ]; then
+    echo "[ERROR] Binary Dropbear gagal disalin!"
+    exit 1
+fi
+
+chmod 0755 /usr/local/sbin/dropbear.new
+
+# Ganti binary lama dengan binary baru
+mv -f /usr/local/sbin/dropbear.new /usr/local/sbin/dropbear
 
 # SYMLINK
 ln -sfn /usr/local/sbin/dropbear /usr/sbin/dropbear
 
+# VERIFY INSTALLED BINARY
+if [ ! -f /usr/local/sbin/dropbear ] || [ ! -x /usr/local/sbin/dropbear ]; then
+    echo "[ERROR] Binary Dropbear tidak valid!"
+    exit 1
+fi
+
+if ! /usr/local/sbin/dropbear -V; then
+    echo "[ERROR] Binary Dropbear tidak dapat dieksekusi!"
+    exit 1
+fi
+
+echo "[OK] Binary Dropbear berhasil dipasang"
+
 # INSTALL DROPBEARKEY
 if [ -x ./dropbearkey ]; then
-    install -m 0755 ./dropbearkey /usr/local/bin/dropbearkey
+    install -D -m 0755 ./dropbearkey /usr/local/bin/dropbearkey
+fi
+
+if [ ! -x /usr/local/bin/dropbearkey ]; then
+    echo "[ERROR] Dropbearkey tidak ditemukan!"
+    exit 1
 fi
 
 # HOSTKEY
 mkdir -p /etc/dropbear
 
 if [ ! -s /etc/dropbear/dropbear_rsa_host_key ]; then
-    /usr/local/bin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+    /usr/local/bin/dropbearkey \
+        -t rsa \
+        -f /etc/dropbear/dropbear_rsa_host_key
 fi
 
 if [ ! -s /etc/dropbear/dropbear_ecdsa_host_key ]; then
-    /usr/local/bin/dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
+    /usr/local/bin/dropbearkey \
+        -t ecdsa \
+        -f /etc/dropbear/dropbear_ecdsa_host_key
 fi
 
 chmod 600 /etc/dropbear/dropbear_*_host_key
+
+# BANNER
 touch /etc/banner.txt
 
 # SERVICE
@@ -70,9 +137,18 @@ RestartSec=3
 WantedBy=multi-user.target
 EOL
 
+# VERIFY SERVICE EXECUTABLE
+if [ ! -x /usr/local/sbin/dropbear ]; then
+    echo "[ERROR] ExecStart binary tidak tersedia!"
+    exit 1
+fi
+
 # ENABLE AND START
+echo "=== START DROPBEAR SERVICE ==="
+
 systemctl daemon-reload
 systemctl enable dropbear
+
 systemctl reset-failed dropbear 2>/dev/null || true
 systemctl restart dropbear
 
@@ -80,13 +156,18 @@ systemctl restart dropbear
 sleep 2
 
 if systemctl is-active --quiet dropbear; then
-    echo "DROPBEAR BERHASIL DIINSTALL DAN RUNNING"
+    echo ""
+    echo "=================================="
+    echo " DROPBEAR BERHASIL RUNNING"
+    echo "=================================="
 else
-    echo "DROPBEAR GAGAL RUNNING"
-    journalctl -u dropbear -n 30 --no-pager
+    echo ""
+    echo "[ERROR] DROPBEAR GAGAL RUNNING"
+    journalctl -u dropbear -n 40 --no-pager
     exit 1
 fi
 
+# STATUS
 echo ""
 echo "===== DROPBEAR STATUS ====="
 systemctl status dropbear --no-pager -l
@@ -98,3 +179,6 @@ ss -tulpn | grep dropbear || true
 echo ""
 echo "===== DROPBEAR VERSION ====="
 /usr/local/sbin/dropbear -V
+
+echo ""
+echo "=== INSTALLATION COMPLETE ==="
