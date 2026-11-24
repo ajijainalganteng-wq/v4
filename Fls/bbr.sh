@@ -1,267 +1,134 @@
-
 #!/bin/bash
-# =========================================
-# Edition : BBR Stable Edition V4.0
-# Author  : RIPZZ STORE
-# TCP BBR : Official Linux Kernel
-# Support : Ubuntu / Debian-based systems
-# =========================================
+# ╔════════════════════════════════════════════════════════════╗
+# ║ 🚀 XWAN VPN :: SPEED OPTIMIZER v1.0                        ║
+# ║ ⚙️  Developer: XWAN STORE | Optimasi TCP & System Kernel   ║
+# ╚════════════════════════════════════════════════════════════╝
 
-red='\e[1;31m'
-green='\e[0;32m'
-purple='\e[0;35m'
-orange='\e[0;33m'
-NC='\e[0m'
-
-BBR_CONF="/etc/sysctl.d/99-ripzz-bbr.conf"
-MODULE_CONF="/etc/modules-load.d/99-ripzz-bbr.conf"
+# 🎨 WARNA
+NC="\e[0m"
+RED="\e[31m"
+GRN="\e[32m"
+YLW="\e[33m"
+BLU="\e[34m"
+CYN="\e[36m"
+WHT="\e[37m"
 
 clear
+echo -e "${CYN}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${CYN}║   ⚙️  RIPZZ VPN — Speed Optimization Tool     ║${NC}"
+echo -e "${CYN}╚══════════════════════════════════════════════╝${NC}"
+sleep 1
 
-echo ""
-echo -e "${green}Installing Official TCP BBR${NC}"
-echo -e "${purple}RIPZZ STORE - Stable Edition V4.0${NC}"
-echo ""
-
-# =========================================
-# ROOT CHECK
-# =========================================
-
-if [[ "$EUID" -ne 0 ]]; then
-    echo -e "${red}Error: Please run this script as root.${NC}"
-    exit 1
-fi
-
-# =========================================
-# CHECK REQUIRED COMMANDS
-# =========================================
-
-for cmd in sysctl modprobe awk grep cp install; do
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo -e "${red}Missing required command: $cmd${NC}"
-        exit 1
-    fi
-done
-
-# =========================================
-# BACKUP CONFIGURATION
-# =========================================
-
-BACKUP_DIR="/root/bbr-backup-$(date +%Y%m%d-%H%M%S)"
-
-mkdir -p "$BACKUP_DIR"
-
-for file in "$BBR_CONF" "$MODULE_CONF"; do
-    if [[ -f "$file" ]]; then
-        cp -a "$file" "$BACKUP_DIR/"
-    fi
-done
-
-# =========================================
-# CHECK BBR SUPPORT
-# =========================================
-
-Check_BBR() {
-    local available
-
-    available="$(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null)"
-
-    echo "$available" | tr ' ' '\n' | grep -qx "bbr"
+# ==========================================================
+# 🔧 FUNCTION: Add_To_New_Line
+# → Menambahkan teks ke baris baru di file target
+# ==========================================================
+Add_To_New_Line() {
+	if [ "$(tail -n1 "$1" | wc -l)" == "0" ]; then
+		echo "" >> "$1"
+	fi
+	echo "$2" >> "$1"
 }
 
-# =========================================
-# INSTALL BBR
-# =========================================
+# ==========================================================
+# 🔍 FUNCTION: Check_And_Add_Line
+# → Mengecek apakah baris sudah ada, jika belum tambahkan
+# ==========================================================
+Check_And_Add_Line() {
+	if [ -z "$(grep "$2" "$1")" ]; then
+		Add_To_New_Line "$1" "$2"
+	fi
+}
 
+# ==========================================================
+# ⚙️ FUNCTION: Install_BBR
+# → Mengaktifkan TCP_BBR untuk optimasi koneksi
+# ==========================================================
 Install_BBR() {
+	echo -e "${BLU}╔══════════════════════════════════════════════╗${NC}"
+	echo -e "${BLU}║ 🚀 Install TCP_BBR BY RIPZZ STORE             ║${NC}"
+	echo -e "${BLU}╚══════════════════════════════════════════════╝${NC}"
 
-    echo -e "${green}================================${NC}"
-    echo -e "${green}Checking TCP BBR Support...${NC}"
+	if lsmod | grep -q bbr; then
+		echo -e "${GRN}✔ TCP_BBR sudah terpasang.${NC}"
+		echo ""
+		return 1
+	fi
 
-    echo "Kernel Version: $(uname -r)"
+	echo -e "${YLW}⏳ Memulai instalasi TCP_BBR...${NC}"
+	modprobe tcp_bbr
 
-    # Try loading official kernel module
-    modprobe tcp_bbr 2>/dev/null || true
+	Add_To_New_Line "/etc/modules-load.d/modules.conf" "tcp_bbr"
+	Add_To_New_Line "/etc/sysctl.conf" "net.core.default_qdisc = fq"
+	Add_To_New_Line "/etc/sysctl.conf" "net.ipv4.tcp_congestion_control = bbr"
+	sysctl -p &> /dev/null
 
-    # Check BBR availability
-    if ! Check_BBR; then
-        echo -e "${red}BBR is not supported by this kernel.${NC}"
-        echo -e "${orange}Please install a supported Ubuntu kernel.${NC}"
-        return 1
-    fi
+	if sysctl net.ipv4.tcp_available_congestion_control | grep -q bbr && \
+	   sysctl net.ipv4.tcp_congestion_control | grep -q bbr && \
+	   lsmod | grep -q "tcp_bbr"; then
+		echo -e "${GRN}✔ TCP_BBR berhasil diaktifkan.${NC}"
+	else
+		echo -e "${RED}✖ Gagal mengaktifkan TCP_BBR.${NC}"
+	fi
 
-    echo -e "${green}TCP BBR is supported.${NC}"
-
-    # Load module automatically at boot if modular
-    if modinfo tcp_bbr >/dev/null 2>&1; then
-        install -d -m 755 /etc/modules-load.d
-        echo "tcp_bbr" > "$MODULE_CONF"
-        chmod 644 "$MODULE_CONF"
-    else
-        rm -f "$MODULE_CONF"
-    fi
-
-    echo -e "${green}BBR module configuration completed.${NC}"
-
-    # =====================================
-    # CHECK FQ SUPPORT
-    # =====================================
-
-    local use_fq=0
-
-    if modprobe sch_fq 2>/dev/null || [[ -d /sys/module/sch_fq ]]; then
-        use_fq=1
-    fi
-
-    # =====================================
-    # WRITE OFFICIAL BBR CONFIGURATION
-    # =====================================
-
-    install -d -m 755 /etc/sysctl.d
-
-    if [[ "$use_fq" -eq 1 ]]; then
-
-        cat > "$BBR_CONF" <<EOF
-# RIPZZ STORE - Official TCP BBR
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-EOF
-
-    else
-
-        echo "net.ipv4.tcp_congestion_control = bbr" > "$BBR_CONF"
-
-        echo -e "${orange}FQ is unavailable. Using BBR without FQ.${NC}"
-
-    fi
-
-    chmod 644 "$BBR_CONF"
-
-    # =====================================
-    # APPLY CONFIGURATION
-    # =====================================
-
-    if ! sysctl -p "$BBR_CONF" >/dev/null 2>&1; then
-
-        echo -e "${orange}FQ configuration failed. Retrying BBR only.${NC}"
-
-        cat > "$BBR_CONF" <<EOF
-# RIPZZ STORE - Official TCP BBR
-net.ipv4.tcp_congestion_control = bbr
-EOF
-
-        if ! sysctl -p "$BBR_CONF" >/dev/null 2>&1; then
-            echo -e "${red}Failed to apply BBR configuration.${NC}"
-            return 1
-        fi
-
-    fi
-
-    # =====================================
-    # VERIFY BBR
-    # =====================================
-
-    local current
-
-    current="$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)"
-
-    if [[ "$current" == "bbr" ]] && Check_BBR; then
-
-        echo -e "${green}TCP BBR Installation Successful!${NC}"
-
-    else
-
-        echo -e "${red}TCP BBR verification failed.${NC}"
-        return 1
-
-    fi
-
-    echo -e "${green}================================${NC}"
-
-    return 0
+	echo ""
+	sleep 1
 }
 
-# =========================================
-# OPTIMIZE PARAMETERS
-# =========================================
-
+# ==========================================================
+# ⚙️ FUNCTION: Optimize_Parameters
+# → Meningkatkan performa jaringan & sistem file
+# ==========================================================
 Optimize_Parameters() {
+	echo -e "${CYN}╔══════════════════════════════════════════════╗${NC}"
+	echo -e "${CYN}║ 🔧 Optimasi Parameter Sistem                 ║${NC}"
+	echo -e "${CYN}╚══════════════════════════════════════════════╝${NC}"
 
-    echo -e "${green}================================${NC}"
-    echo -e "${green}Checking Network Configuration...${NC}"
+	# 🔹 Limit File Descriptor
+	Check_And_Add_Line "/etc/security/limits.conf" "* soft nofile 51200"
+	Check_And_Add_Line "/etc/security/limits.conf" "* hard nofile 51200"
+	Check_And_Add_Line "/etc/security/limits.conf" "root soft nofile 51200"
+	Check_And_Add_Line "/etc/security/limits.conf" "root hard nofile 51200"
 
-    # =====================================
-    # CHECK TCP BBR
-    # =====================================
+	# 🔹 Kernel Performance Tweaks
+	Check_And_Add_Line "/etc/sysctl.conf" "fs.file-max = 51200"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.core.rmem_max = 67108864"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.core.wmem_max = 67108864"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.core.netdev_max_backlog = 250000"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.core.somaxconn = 4096"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_syncookies = 1"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_tw_reuse = 1"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_fin_timeout = 30"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_keepalive_time = 1200"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.ip_local_port_range = 10000 65000"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_max_syn_backlog = 8192"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_max_tw_buckets = 5000"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_fastopen = 3"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_mem = 25600 51200 102400"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_rmem = 4096 87380 67108864"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_wmem = 4096 65536 67108864"
+	Check_And_Add_Line "/etc/sysctl.conf" "net.ipv4.tcp_mtu_probing = 1"
 
-    if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" != "bbr" ]]; then
-        echo -e "${red}BBR is not active. Optimization cancelled.${NC}"
-        return 1
-    fi
-
-    # =====================================
-    # VERIFY FQ
-    # =====================================
-
-    local qdisc
-
-    qdisc="$(sysctl -n net.core.default_qdisc 2>/dev/null)"
-
-    if [[ "$qdisc" == "fq" ]]; then
-        echo -e "${green}FQ Queue Discipline: Active${NC}"
-    else
-        echo -e "${orange}FQ Queue Discipline: Not Active${NC}"
-    fi
-
-    # =====================================
-    # VERIFY PERSISTENT CONFIGURATION
-    # =====================================
-
-    if [[ ! -s "$BBR_CONF" ]]; then
-        echo -e "${red}BBR configuration file is missing.${NC}"
-        return 1
-    fi
-
-    echo -e "${green}Persistent configuration verified.${NC}"
-
-    echo -e "${green}================================${NC}"
-
-    return 0
+	sysctl -p &> /dev/null
+	echo -e "${GRN}✔ Optimasi parameter sistem selesai.${NC}"
+	echo ""
+	sleep 1
 }
 
-# =========================================
-# MAIN INSTALLATION
-# =========================================
+# ==========================================================
+# 🚀 EKSEKUSI UTAMA
+# ==========================================================
+Install_BBR
+Optimize_Parameters
 
-if ! Install_BBR; then
-    echo ""
-    echo -e "${red}BBR Installation Failed!${NC}"
-    echo -e "${orange}Backup: $BACKUP_DIR${NC}"
-    exit 1
-fi
+# ==========================================================
+# 🧹 BERSIHKAN
+# ==========================================================
+rm -f /root/bbr.sh
 
-if ! Optimize_Parameters; then
-    echo -e "${red}BBR Optimization Verification Failed!${NC}"
-    exit 1
-fi
-
-# =========================================
-# FINAL STATUS
-# =========================================
-
-echo ""
-echo -e "${green}================================================${NC}"
-echo -e "${green}       OFFICIAL TCP BBR INSTALLATION SUCCESS     ${NC}"
-echo -e "${green}================================================${NC}"
-
-echo ""
-echo -e "${purple}Kernel Version:${NC} $(uname -r)"
-echo -e "${purple}Congestion Control:${NC} $(sysctl -n net.ipv4.tcp_congestion_control)"
-echo -e "${purple}Default Qdisc:${NC} $(sysctl -n net.core.default_qdisc)"
-echo -e "${purple}Backup Directory:${NC} $BACKUP_DIR"
-
-echo ""
-echo -e "${green}BBR is configured for automatic startup.${NC}"
-echo ""
-
-exit 0
+# ==========================================================
+# ✅ SELESAI
+# ==========================================================
+echo -e "${BLU}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${BLU}║ ✅ Optimasi selesai! Reboot disarankan.      ║${NC}"
+echo -e "${BLU}╚══════════════════════════════════════════════╝${NC}"
