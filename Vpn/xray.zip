@@ -652,14 +652,14 @@ print_success "SSHD"
 clear
 function ins_dropbear(){
 clear
-print_install "Menginstall Dropbear"
-apt-get install dropbear -y > /dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
-chmod +x /etc/default/dropbear
-# Download dan jalankan installer Dropbear 2019.78
+print_install "Menginstall Dropbear 2019.78"
+# 1. Download dan jalankan installer Dropbear 2019.78 terlebih dahulu
 wget -q -O /root/install_dropbear2019.sh "${REPO}Cfg/install_dropbear2019.sh"
 chmod +x /root/install_dropbear2019.sh
 bash /root/install_dropbear2019.sh
+# 2. Setelah installer selesai, pasang konfigurasi Dropbear
+wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+chmod 644 /etc/default/dropbear
 /etc/init.d/dropbear restart
 /etc/init.d/dropbear status
 print_success "Dropbear"
