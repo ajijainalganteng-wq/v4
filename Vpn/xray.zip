@@ -917,38 +917,107 @@ chmod +x udp.sh
 print_success "UDP-CUSTOM BY ARISCTUNNEL V4"
 }
 function ins_restart(){
-clear
-print_install "Restarting  All Packet"
-/etc/init.d/nginx restart
-/etc/init.d/openvpn restart
-/etc/init.d/ssh restart
-/etc/init.d/dropbear restart
-/etc/init.d/fail2ban restart
-/etc/init.d/vnstat restart
-systemctl restart haproxy
-/etc/init.d/cron restart
-systemctl restart zivpn
-systemctl daemon-reload
-systemctl start netfilter-persistent
-systemctl enable --now nginx
-systemctl enable --now xray
-systemctl enable --now rc-local
-systemctl enable --now dropbear
-systemctl enable --now openvpn
-systemctl enable --now cron
-systemctl enable --now haproxy
-systemctl enable --now netfilter-persistent
-systemctl enable --now ws
-systemctl enable --now fail2ban
-systemctl enable --now udp-custom
-systemctl enable --NOW noobzvpns
-history -c
-echo "unset HISTFILE" >> /etc/profile
-cd
-rm -f /root/openvpn
-rm -f /root/key.pem
-rm -f /root/cert.pem
-print_success "All Packet"
+    clear
+    print_install "Restarting All Packet"
+
+    # Muat ulang konfigurasi systemd terlebih dahulu
+    systemctl daemon-reload
+
+    # Fungsi restart service dengan pemeriksaan unit
+    restart_unit(){
+        local UNIT="$1"
+
+        if ! systemctl cat "$UNIT" >/dev/null 2>&1; then
+            echo "[SKIP] $UNIT tidak ditemukan"
+            return 0
+        fi
+
+        echo "[RESTART] $UNIT"
+
+        if systemctl restart "$UNIT"; then
+            echo "[OK] $UNIT berhasil direstart"
+        else
+            echo "[WARNING] Restart $UNIT gagal, mencoba start..."
+
+            if systemctl start "$UNIT"; then
+                echo "[OK] $UNIT berhasil dijalankan"
+            else
+                echo "[ERROR] $UNIT gagal dijalankan"
+                return 1
+            fi
+        fi
+    }
+
+    # Web server
+    restart_unit nginx
+
+    # OpenVPN TCP dan UDP
+    restart_unit openvpn-server@server-tcp
+    restart_unit openvpn-server@server-udp
+
+    # SSH dan Dropbear
+    restart_unit ssh
+    restart_unit dropbear
+
+    # Keamanan dan monitoring
+    restart_unit fail2ban
+    restart_unit vnstat
+
+    # HAProxy
+    if haproxy -c -f /etc/haproxy/haproxy.cfg; then
+        restart_unit haproxy
+    else
+        echo "[ERROR] HAProxy tidak direstart karena konfigurasi tidak valid"
+    fi
+
+    # Cron
+    restart_unit cron
+
+    # Xray
+    restart_unit xray
+
+    # Service tambahan
+    restart_unit zivpn
+    restart_unit rc-local
+    restart_unit netfilter-persistent
+    restart_unit ws
+    restart_unit udp-custom
+    restart_unit noobzvpns
+
+    # Tampilkan status akhir
+    echo
+    echo "========== STATUS AKHIR =========="
+
+    for UNIT in \
+        nginx \
+        openvpn-server@server-tcp \
+        openvpn-server@server-udp \
+        ssh \
+        dropbear \
+        fail2ban \
+        vnstat \
+        haproxy \
+        cron \
+        xray \
+        zivpn \
+        rc-local \
+        netfilter-persistent \
+        ws \
+        udp-custom \
+        noobzvpns
+    do
+        if systemctl cat "$UNIT" >/dev/null 2>&1; then
+            printf "%-35s : " "$UNIT"
+
+            if systemctl is-active --quiet "$UNIT"; then
+                echo "ACTIVE"
+            else
+                echo "INACTIVE"
+            fi
+        fi
+    done
+
+    print_success "Proses restart seluruh packet selesai"
 }
 function menuv4(){
 clear
