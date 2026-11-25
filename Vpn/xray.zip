@@ -726,53 +726,16 @@ rm -rf /root/vnstat-2.6
 print_success "Vnstat"
 }
 function ins_openvpn() {
-    clear
-    print_install "Menginstall OpenVPN"
-
-    # Install paket
-    apt-get update
-    if ! apt-get install -y openvpn; then
-        print_error "Gagal menginstall OpenVPN"
-        return 1
-    fi
-
-    # Download dan jalankan installer
-    if ! wget -q -O /tmp/ripzz-openvpn-installer "${REPO}Fls/openvpn"; then
-        print_error "Gagal mendownload installer OpenVPN"
-        return 1
-    fi
-
-    chmod +x /tmp/ripzz-openvpn-installer
-
-    if ! bash /tmp/ripzz-openvpn-installer; then
-        print_error "Gagal menjalankan konfigurasi OpenVPN"
-        return 1
-    fi
-
-    # Validasi konfigurasi
-    for file in server-tcp.conf server-udp.conf; do
-        if [ ! -s "/etc/openvpn/server/$file" ]; then
-            print_error "Konfigurasi $file tidak ditemukan"
-            return 1
-        fi
-    done
-
-    # Aktifkan service TCP dan UDP
-    systemctl daemon-reload
-
-    for service in server-tcp server-udp; do
-        if ! systemctl enable --now "openvpn-server@$service"; then
-            print_error "OpenVPN $service gagal dijalankan"
-            return 1
-        fi
-
-        if ! systemctl is-active --quiet "openvpn-server@$service"; then
-            print_error "OpenVPN $service belum aktif"
-            return 1
-        fi
-    done
-
-    print_success "OpenVPN TCP dan UDP berhasil diinstall dan dijalankan"
+clear
+print_install "Menginstall OpenVPN"
+apt-get update
+apt-get install -y openvpn
+wget ${REPO}Fls/openvpn &&  chmod +x openvpn && ./openvpn
+/etc/init.d/openvpn restart
+systemctl restart openvpn
+/etc/init.d/openvpn restart
+/etc/init.d/openvpn status
+print_success "OpenVPN"
 }
 function ins_backup() {
     clear
