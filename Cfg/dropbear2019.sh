@@ -29,19 +29,21 @@ dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
 dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
 
 # SERVICE
+# SERVICE
 cat > /etc/systemd/system/dropbear.service <<EOL
 [Unit]
 Description=Dropbear SSH Server (2019)
 After=network.target
 
 [Service]
-ExecStart=/usr/sbin/dropbear -EF -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt
+Type=simple
+ExecStart=/usr/sbin/dropbear -EF -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOL
-
 # ENABLE
 systemctl daemon-reexec
 systemctl daemon-reload
@@ -64,8 +66,3 @@ echo "=== VERSION ==="
 
 echo ""
 echo "=== DONE ==="
-
-EOF
-
-
-ln -s /usr/sbin/dropbear /usr/sbin/dropbear
