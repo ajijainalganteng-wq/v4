@@ -12,14 +12,58 @@ unzip -d /etc/openvpn/ /etc/openvpn/vpn.zip
 rm -f /etc/openvpn/vpn.zip
 chown -R root:root /etc/openvpn/server/easy-rsa/
 }
+
 function config_easy() {
-cd
-mkdir -p /usr/lib/openvpn/
-cp /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so /usr/lib/openvpn/openvpn-plugin-auth-pam.so
-sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
-systemctl enable --now openvpn-server@server-tcp
-systemctl enable --now openvpn-server@server-udp
-/etc/init.d/openvpn restart
+    print_install "Configuring OpenVPN TCP & UDP"
+
+    # Pastikan paket OpenVPN terpasang
+    if ! command -v openvpn >/dev/null 2>&1; then
+        apt-get update || return 1
+        apt-get install -y openvpn || return 1
+    fi
+
+    # Pastikan konfigurasi dan sertifikat tersedia
+    for file in \
+        server-tcp.conf \
+        server-udp.conf \
+        ca.crt \
+        server.crt \
+        server.key \
+        dh2048.pem
+    do
+        if [ ! -s "/etc/openvpn/server/$file" ]; then
+            echo "[ERROR] File tidak ditemukan: $file"
+            return 1
+        fi
+    done
+
+    # Pastikan plugin PAM tersedia
+    if [ ! -e /usr/lib/openvpn/openvpn-plugin-auth-pam.so ]; then
+        echo "[ERROR] Plugin PAM tidak ditemukan"
+        return 1
+    fi
+
+    # Amankan private key
+    chmod 600 /etc/openvpn/server/server.key
+    chmod 600 /etc/openvpn/server/ca.key 2>/dev/null || true
+
+    # Aktifkan IP forwarding
+    cat > /etc/sysctl.d/99-openvpn-forward.conf <<'EOF'
+net.ipv4.ip_forward=1
+EOF
+    sysctl --system >/dev/null || return 1
+
+    # Aktifkan service OpenVPN yang benar
+    systemctl daemon-reload
+
+    systemctl enable --now openvpn-server@server-tcp || return 1
+    systemctl enable --now openvpn-server@server-udp || return 1
+
+    # Verifikasi service
+    systemctl is-active --quiet openvpn-server@server-tcp || return 1
+    systemctl is-active --quiet openvpn-server@server-udp || return 1
+
+    print_success "OpenVPN TCP & UDP berhasil dikonfigurasi"
 }
 function make_follow() {
 echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -240,10 +284,234 @@ EOF
         echo
         echo "<ca>"
         cat "$SERVER_DIR/ca.crt"
+#!/bin/bash
+
+set -Eeuo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+# ==========================================
+# OPENVPN INSTALLER - UBUNTU 24.04
+# RIPZZ STORE
+# ==========================================
+
+REPO="https://raw.githubusercontent.com/arivpnstores/v4/main/"
+VPN_ZIP_URL="${REPO}Vpn/vpn.zip"
+
+OPENVPN_DIR="/etc/openvpn"
+SERVER_DIR="${OPENVPN_DIR}/server"
+WEB_DIR="/var/www/html"
+
+# ==========================================
+# DOMAIN / PUBLIC IP
+# ==========================================
+
+DOMAIN=""
+
+if [ -s /root/domain ]; then
+    DOMAIN="$(head -n 1 /root/domain | tr -d '[:space:]')"
+fi
+
+if [ -z "$DOMAIN" ]; then
+    DOMAIN="$(curl -4fsS --max-time 10 https://api.ipify.org || true)"
+fi
+
+if [ -z "$DOMAIN" ]; then
+    echo "[ERROR] Domain dan IP publik tidak berhasil didapatkan"
+    exit 1
+fi
+
+BACKUP_DIR="/root/backup-openvpn-$(date +%Y%m%d_%H%M%S)"
+TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+    rm -rf "$TMP_DIR"
+}
+
+trap cleanup EXIT
+
+# ==========================================
+# INSTALLATION HEADER
+# ==========================================
+
+echo "=========================================="
+echo "          INSTALL OPENVPN SERVER"
+echo "=========================================="
+echo "Host VPN : $DOMAIN"
+echo
+
+# ==========================================
+# 1. ROOT CHECK
+# ==========================================
+
+if [ "$EUID" -ne 0 ]; then
+    echo "[ERROR] Jalankan installer sebagai root"
+    exit 1
+fi
+
+# ==========================================
+# 2. INSTALL DEPENDENCIES
+# ==========================================
+
+echo "[1/10] Menginstall dependencies..."
+
+apt-get update
+
+apt-get install -y \
+    openvpn \
+    unzip \
+    zip \
+    curl \
+    wget \
+    ca-certificates
+
+# ==========================================
+# 3. DOWNLOAD VPN ZIP
+# ==========================================
+
+echo "[2/10] Download konfigurasi OpenVPN..."
+
+if ! curl -fL --retry 3 --connect-timeout 15 \
+    "$VPN_ZIP_URL" \
+    -o "$TMP_DIR/vpn.zip"; then
+
+    echo "[ERROR] Download vpn.zip gagal"
+    exit 1
+fi
+
+if ! unzip -tq "$TMP_DIR/vpn.zip" >/dev/null; then
+    echo "[ERROR] File vpn.zip rusak atau tidak valid"
+    exit 1
+fi
+
+# ==========================================
+# 4. BACKUP CONFIGURATION
+# ==========================================
+
+echo "[3/10] Backup konfigurasi lama..."
+
+if [ -d "$OPENVPN_DIR" ]; then
+    mkdir -p "$BACKUP_DIR"
+    cp -a "$OPENVPN_DIR/." "$BACKUP_DIR/"
+    echo "[OK] Backup: $BACKUP_DIR"
+fi
+
+# ==========================================
+# 5. EXTRACT CONFIGURATION
+# ==========================================
+
+echo "[4/10] Ekstrak konfigurasi OpenVPN..."
+
+mkdir -p "$OPENVPN_DIR"
+
+if ! unzip -oq "$TMP_DIR/vpn.zip" -d "$OPENVPN_DIR"; then
+    echo "[ERROR] Ekstraksi konfigurasi gagal"
+    exit 1
+fi
+
+mkdir -p "$SERVER_DIR"
+
+# ==========================================
+# 6. CHECK SERVER FILES
+# ==========================================
+
+echo "[5/10] Memeriksa konfigurasi server..."
+
+REQUIRED_FILES=(
+    "$SERVER_DIR/server-tcp.conf"
+    "$SERVER_DIR/server-udp.conf"
+    "$SERVER_DIR/ca.crt"
+    "$SERVER_DIR/server.crt"
+    "$SERVER_DIR/server.key"
+    "$SERVER_DIR/dh2048.pem"
+)
+
+for FILE in "${REQUIRED_FILES[@]}"; do
+    if [ ! -s "$FILE" ]; then
+        echo "[ERROR] File tidak ditemukan atau kosong: $FILE"
+        echo "[INFO] Periksa isi vpn.zip dan struktur direktorinya."
+        exit 1
+    fi
+done
+
+# ==========================================
+# 7. PAM PLUGIN
+# ==========================================
+
+echo "[6/10] Memeriksa plugin PAM..."
+
+PAM_PLUGIN="/usr/lib/openvpn/openvpn-plugin-auth-pam.so"
+
+if [ ! -e "$PAM_PLUGIN" ]; then
+
+    PAM_SOURCE="/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null)/openvpn/plugins/openvpn-plugin-auth-pam.so"
+
+    if [ -e "$PAM_SOURCE" ]; then
+        mkdir -p /usr/lib/openvpn
+        ln -sf "$PAM_SOURCE" "$PAM_PLUGIN"
+    else
+        echo "[ERROR] Plugin OpenVPN PAM tidak ditemukan"
+        exit 1
+    fi
+fi
+
+# Lindungi private key
+chmod 600 "$SERVER_DIR/server.key"
+
+[ ! -f "$SERVER_DIR/ca.key" ] || chmod 600 "$SERVER_DIR/ca.key"
+
+chown -R root:root "$SERVER_DIR"
+
+# ==========================================
+# 8. IPV4 FORWARDING
+# ==========================================
+
+echo "[7/10] Mengaktifkan IPv4 forwarding..."
+
+cat > /etc/sysctl.d/99-openvpn-forward.conf <<'EOF'
+net.ipv4.ip_forward=1
+EOF
+
+sysctl -w net.ipv4.ip_forward=1
+
+# ==========================================
+# 9. CREATE CLIENT CONFIG
+# ==========================================
+
+echo "[8/10] Membuat konfigurasi client..."
+
+mkdir -p "$WEB_DIR"
+
+create_client() {
+
+    local NAME="$1"
+    local PORT="$2"
+    local PROTOCOL="$3"
+    local OUTPUT="${OPENVPN_DIR}/${NAME}.ovpn"
+
+    cat > "$OUTPUT" <<EOF
+client
+dev tun
+proto ${PROTOCOL}
+remote ${DOMAIN} ${PORT}
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+auth-user-pass
+remote-cert-tls server
+verb 3
+EOF
+
+    # Tambahkan CA
+    {
+        echo
+        echo "<ca>"
+        cat "$SERVER_DIR/ca.crt"
         echo "</ca>"
     } >> "$OUTPUT"
 
     chmod 644 "$OUTPUT"
+
     cp -f "$OUTPUT" "$WEB_DIR/$NAME.ovpn"
 
     echo "[OK] ${NAME}.ovpn"
@@ -251,10 +519,6 @@ EOF
 
 create_client "tcp" 1194 "tcp-client"
 create_client "udp" 2200 "udp"
-
-# Profil 443 hanya berfungsi jika port tersebut
-# memang diarahkan ke listener OpenVPN melalui HAProxy
-# atau konfigurasi jaringan lainnya.
 create_client "ws-ssl" 443 "tcp-client"
 create_client "ssl" 443 "tcp-client"
 
@@ -266,6 +530,7 @@ echo "[9/10] Membuat arsip konfigurasi..."
 
 (
     cd "$WEB_DIR"
+
     zip -q -j -FS Kyt-Project.zip \
         tcp.ovpn \
         udp.ovpn \
@@ -276,30 +541,65 @@ echo "[9/10] Membuat arsip konfigurasi..."
 cat > "$WEB_DIR/index.html" <<EOF
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenVPN Config Download</title>
-<style>
-body{font-family:Arial;background:#101827;color:white;padding:25px}
-.container{max-width:500px;margin:40px auto}
-.card{background:#1e293b;padding:22px;border-radius:12px}
-a{display:block;background:#16a34a;color:white;padding:13px;
-margin:12px 0;text-align:center;text-decoration:none;border-radius:7px}
-h2{text-align:center}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>OpenVPN Config Download</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #101827;
+            color: white;
+            padding: 25px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 40px auto;
+        }
+
+        .card {
+            background: #1e293b;
+            padding: 22px;
+            border-radius: 12px;
+        }
+
+        a {
+            display: block;
+            background: #16a34a;
+            color: white;
+            padding: 13px;
+            margin: 12px 0;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 7px;
+        }
+
+        h2 {
+            text-align: center;
+        }
+    </style>
 </head>
+
 <body>
-<div class="container">
-<div class="card">
-<h2>OPENVPN CONFIG</h2>
-<a href="/tcp.ovpn">Download TCP 1194</a>
-<a href="/udp.ovpn">Download UDP 2200</a>
-<a href="/ssl.ovpn">Download SSL 443</a>
-<a href="/ws-ssl.ovpn">Download WS SSL 443</a>
-<a href="/Kyt-Project.zip">Download ALL CONFIG ZIP</a>
-</div>
-</div>
+
+    <div class="container">
+        <div class="card">
+
+            <h2>OPENVPN CONFIG</h2>
+
+            <a href="/tcp.ovpn">Download TCP 1194</a>
+            <a href="/udp.ovpn">Download UDP 2200</a>
+            <a href="/ssl.ovpn">Download SSL 443</a>
+            <a href="/ws-ssl.ovpn">Download WS SSL 443</a>
+            <a href="/Kyt-Project.zip">Download ALL CONFIG ZIP</a>
+
+        </div>
+    </div>
+
 </body>
 </html>
 EOF
@@ -326,25 +626,33 @@ echo
 echo "========== OPENVPN STATUS =========="
 
 if ! systemctl is-active --quiet openvpn-server@server-tcp; then
+
     echo "[ERROR] OpenVPN TCP gagal berjalan"
+
     journalctl -u openvpn-server@server-tcp -n 30 --no-pager
+
     exit 1
 fi
 
 if ! systemctl is-active --quiet openvpn-server@server-udp; then
+
     echo "[ERROR] OpenVPN UDP gagal berjalan"
+
     journalctl -u openvpn-server@server-udp -n 30 --no-pager
+
     exit 1
 fi
 
 echo "[OK] OpenVPN TCP ACTIVE"
 echo "[OK] OpenVPN UDP ACTIVE"
+
 echo
 echo "TCP CONFIG : ${DOMAIN}:1194"
 echo "UDP CONFIG : ${DOMAIN}:2200"
 echo "SSL CONFIG : ${DOMAIN}:443"
 echo "WEB CONFIG : ${WEB_DIR}/index.html"
 echo "BACKUP     : ${BACKUP_DIR}"
+
 echo
 echo "=========================================="
 echo "       OPENVPN INSTALLATION SUCCESS"
