@@ -285,10 +285,8 @@ function first_setup() {
         return 1
     fi
 
-    # Timezone
+    # Timezone dan deteksi OS
     timedatectl set-timezone Asia/Jakarta
-
-    # OS detection
     . /etc/os-release
 
     if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
@@ -306,16 +304,13 @@ function first_setup() {
 
     # Install dependencies
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        ca-certificates \
-        curl \
-        gnupg \
-        software-properties-common \
-        haproxy || {
+        ca-certificates curl gnupg \
+        software-properties-common haproxy || {
         echo "HAProxy installation failed!"
         return 1
     }
 
-    # Check HAProxy binary
+    # Validasi HAProxy
     if ! command -v haproxy >/dev/null 2>&1; then
         echo "HAProxy binary not found!"
         return 1
@@ -324,7 +319,6 @@ function first_setup() {
     echo "===== HAPROXY VERSION ====="
     haproxy -v
 
-    # Check configuration file
     if [[ ! -f /etc/haproxy/haproxy.cfg ]]; then
         echo "HAProxy configuration file not found!"
         return 1
@@ -338,25 +332,21 @@ function first_setup() {
         return 1
     fi
 
-    # Reload systemd
+    # Aktifkan dan restart HAProxy
     systemctl daemon-reload
 
-    # Enable HAProxy
-    systemctl enable haproxy || {
+    if ! systemctl enable haproxy; then
         echo "Failed to enable HAProxy!"
         return 1
-    }
+    fi
 
-    # Restart HAProxy
-    if systemctl restart haproxy; then
-        echo "HAProxy restarted successfully!"
-    else
+    if ! systemctl restart haproxy; then
         echo "HAProxy failed to restart!"
         journalctl -u haproxy -n 30 --no-pager
         return 1
     fi
 
-    # Verify service
+    # Verifikasi service
     if systemctl is-active --quiet haproxy; then
         print_success "HAProxy Installation Completed"
     else
