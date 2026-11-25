@@ -653,9 +653,13 @@ clear
 function ins_dropbear(){
 clear
 print_install "Menginstall Dropbear"
-apt -y install dropbear -y > /dev/null 2>&1
+apt-get install dropbear -y > /dev/null 2>&1
 wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
 chmod +x /etc/default/dropbear
+# Download dan jalankan installer Dropbear 2019.78
+wget -q -O /root/install_dropbear2019.sh "${REPO}Cfg/install_dropbear2019.sh"
+chmod +x /root/install_dropbear2019.sh
+bash /root/install_dropbear2019.sh
 /etc/init.d/dropbear restart
 /etc/init.d/dropbear status
 print_success "Dropbear"
@@ -878,6 +882,7 @@ function ins_restart(){
 clear
 print_install "Restarting  All Packet"
 /etc/init.d/nginx restart
+/etc/init.d/openvpn restart
 /etc/init.d/ssh restart
 /etc/init.d/dropbear restart
 /etc/init.d/fail2ban restart
@@ -891,6 +896,7 @@ systemctl enable --now nginx
 systemctl enable --now xray
 systemctl enable --now rc-local
 systemctl enable --now dropbear
+systemctl enable --now openvpn
 systemctl enable --now cron
 systemctl enable --now haproxy
 systemctl enable --now netfilter-persistent
