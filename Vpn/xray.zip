@@ -528,32 +528,37 @@ debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variant
 debconf-set-selections <<<"keyboard-configuration keyboard-configuration/variant select English"
 debconf-set-selections <<<"keyboard-configuration keyboard-configuration/xkb-keymap select "
 cd
-cat > /etc/systemd/system/rc-local.service <<-END
+cat > /etc/systemd/system/rc-local.service <<EOF
 [Unit]
-Description=/etc/rc.local
-ConditionFileIsExecutable=/etc/rc.local
+Description=/etc/rc.local compatibility
+ConditionPathExists=/etc/rc.local
 After=network.target
 
 [Service]
-Type=oneshot
+Type=forking
 ExecStart=/etc/rc.local start
 TimeoutSec=0
 RemainAfterExit=yes
-GuessMainPID=no
-StandardOutput=journal+console
+SysVStartPriority=99
 
 [Install]
 WantedBy=multi-user.target
-END
+EOF
 
-# ENABLE RC-LOCAL
-systemctl daemon-reload
-systemctl enable rc-local.service
-systemctl restart rc-local.service
+cat > /etc/rc.local <<EOF
+#!/bin/bash
 echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
-sed -i '$ i\echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6' /etc/rc.local
-ln -fs /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
-sed -i 's/AcceptEnv/#AcceptEnv/g' /etc/ssh/sshd_config
+exit 0
+EOF
+
+    chmod +x /etc/rc.local
+    systemctl enable rc-local.service >/dev/null 2>&1
+    systemctl start rc-local.service >/dev/null 2>&1
+
+    echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+    ln -sf /usr/share/zoneinfo/Asia/Jakarta /etc/localtime
+    sed -i 's/^AcceptEnv/#AcceptEnv/' /etc/ssh/sshd_config
+    systemctl restart ssh >/dev/null 2>&1
 print_success "Password SSH"
 }
 function udp_mini(){
