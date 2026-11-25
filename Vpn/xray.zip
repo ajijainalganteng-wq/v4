@@ -276,60 +276,93 @@ export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/
 export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
-function first_setup(){
-timedatectl set-timezone Asia/Jakarta
-echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
-echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
-print_success "Directory Xray"
+function first_setup() {
+    clear
 
-if [[ $EUID -ne 0 ]]; then
-echo "Please run this script as root"
-exit 1
-fi
+    # Cek akses root
+    if [[ $EUID -ne 0 ]]; then
+        echo "Please run this script as root"
+        return 1
+    fi
 
-. /etc/os-release
+    # Timezone
+    timedatectl set-timezone Asia/Jakarta
 
-if [[ "$ID" == "ubuntu" ]]; then
-echo "Setup Dependencies For OS Is $PRETTY_NAME"
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-ca-certificates curl gnupg software-properties-common
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends haproxy
+    # OS detection
+    . /etc/os-release
 
-elif [[ "$ID" == "debian" ]]; then
-echo "Setup Dependencies For OS Is $PRETTY_NAME"
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-ca-certificates curl gnupg
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends haproxy
+    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
+        echo "Your OS Is Not Supported ($PRETTY_NAME)"
+        return 1
+    fi
 
-else
-echo -e " Your OS Is Not Supported ($PRETTY_NAME)"
-exit 1
-fi
+    echo "Setup Dependencies For OS Is $PRETTY_NAME"
 
-if ! command -v haproxy >/dev/null 2>&1; then
-echo "HAProxy installation failed!"
-exit 1
-fi
+    # Update repository
+    apt-get update || {
+        echo "Failed to update package repository!"
+        return 1
+    }
 
-echo "===== HAPROXY VERSION ====="
-haproxy -v
+    # Install dependencies
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        ca-certificates \
+        curl \
+        gnupg \
+        software-properties-common \
+        haproxy || {
+        echo "HAProxy installation failed!"
+        return 1
+    }
 
-echo "HAProxy package installation completed."
-}
-clear
-function nginx_install() {
-clear
-if [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "ubuntu" ]]; then
-print_install "Setup nginx For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
-sudo apt-get install nginx -y
-elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "debian" ]]; then
-print_success "Setup nginx For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
-apt -y install nginx
-else
-echo -e " Your OS Is Not Supported ( ${YELLOW}$(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')${FONT} )"
-fi
+    # Check HAProxy binary
+    if ! command -v haproxy >/dev/null 2>&1; then
+        echo "HAProxy binary not found!"
+        return 1
+    fi
+
+    echo "===== HAPROXY VERSION ====="
+    haproxy -v
+
+    # Check configuration file
+    if [[ ! -f /etc/haproxy/haproxy.cfg ]]; then
+        echo "HAProxy configuration file not found!"
+        return 1
+    fi
+
+    echo "===== CHECK HAPROXY CONFIGURATION ====="
+
+    if ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
+        echo "HAProxy configuration is INVALID!"
+        echo "Please fix haproxy.cfg before restarting."
+        return 1
+    fi
+
+    # Reload systemd
+    systemctl daemon-reload
+
+    # Enable HAProxy
+    systemctl enable haproxy || {
+        echo "Failed to enable HAProxy!"
+        return 1
+    }
+
+    # Restart HAProxy
+    if systemctl restart haproxy; then
+        echo "HAProxy restarted successfully!"
+    else
+        echo "HAProxy failed to restart!"
+        journalctl -u haproxy -n 30 --no-pager
+        return 1
+    fi
+
+    # Verify service
+    if systemctl is-active --quiet haproxy; then
+        print_success "HAProxy Installation Completed"
+    else
+        echo "HAProxy service is not running!"
+        return 1
+    fi
 }
 clear
 restart_system() {
