@@ -276,83 +276,35 @@ export OS_Name=$( cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/
 export Kernel=$( uname -r )
 export Arch=$( uname -m )
 export IP=$( curl -s https://ipinfo.io/ip/ )
-function first_setup() {
-    clear
 
-    # Cek akses root
-    if [[ $EUID -ne 0 ]]; then
-        echo "Please run this script as root"
-        return 1
-    fi
-
-    # Timezone dan deteksi OS
-    timedatectl set-timezone Asia/Jakarta
-    . /etc/os-release
-
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        echo "Your OS Is Not Supported ($PRETTY_NAME)"
-        return 1
-    fi
-
-    echo "Setup Dependencies For OS Is $PRETTY_NAME"
-
-    # Update repository
-    apt-get update || {
-        echo "Failed to update package repository!"
-        return 1
-    }
-
-    # Install dependencies
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        ca-certificates curl gnupg \
-        software-properties-common haproxy || {
-        echo "HAProxy installation failed!"
-        return 1
-    }
-
-    # Validasi HAProxy
-    if ! command -v haproxy >/dev/null 2>&1; then
-        echo "HAProxy binary not found!"
-        return 1
-    fi
-
-    echo "===== HAPROXY VERSION ====="
-    haproxy -v
-
-    if [[ ! -f /etc/haproxy/haproxy.cfg ]]; then
-        echo "HAProxy configuration file not found!"
-        return 1
-    fi
-
-    echo "===== CHECK HAPROXY CONFIGURATION ====="
-
-    if ! haproxy -c -f /etc/haproxy/haproxy.cfg; then
-        echo "HAProxy configuration is INVALID!"
-        echo "Please fix haproxy.cfg before restarting."
-        return 1
-    fi
-
-    # Aktifkan dan restart HAProxy
-    systemctl daemon-reload
-
-    if ! systemctl enable haproxy; then
-        echo "Failed to enable HAProxy!"
-        return 1
-    fi
-
-    if ! systemctl restart haproxy; then
-        echo "HAProxy failed to restart!"
-        journalctl -u haproxy -n 30 --no-pager
-        return 1
-    fi
-
-    # Verifikasi service
-    if systemctl is-active --quiet haproxy; then
-        print_success "HAProxy Installation Completed"
-    else
-        echo "HAProxy service is not running!"
-        return 1
-    fi
+function first_setup(){
+timedatectl set-timezone Asia/Jakarta
+echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+print_success "Directory Xray"
+if [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "ubuntu" ]]; then
+echo "Setup Dependencies $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
+sudo apt update -y
+elif [[ $(cat /etc/os-release | grep -w ID | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/ID//g') == "debian" ]]; then
+echo "Setup Dependencies For OS Is $(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g')"
+else
+echo -e " Your OS Is Not Supported ($(cat /etc/os-release | grep -w PRETTY_NAME | head -n1 | sed 's/=//g' | sed 's/"//g' | sed 's/PRETTY_NAME//g') )"
+fi
+print_install "Menginstall HAProxy 2.0.33)"
+if haproxy -v 2>/dev/null | grep -q "2\.0"; then print_success "HAProxy 2.0 sudah terpasang, lewati build"; return 0; fi
+apt-get install -y haproxy >/dev/null 2>&1
+[ -f /usr/sbin/haproxy ] && [ ! -f /root/haproxy-stock.bak ] && cp /usr/sbin/haproxy /root/haproxy-stock.bak
+apt-get install -y libssl-dev zlib1g-dev libpcre3-dev libsystemd-dev build-essential gcc make wget >/dev/null 2>&1
+cd /tmp && rm -rf haproxy-2.0.33 haproxy-2.0.33.tar.gz
+if ! wget -q https://www.haproxy.org/download/2.0/src/haproxy-2.0.33.tar.gz; then print_error "Gagal unduh HAProxy 2.0.33, pakai HAProxy bawaan OS"; return 0; fi
+tar xzf haproxy-2.0.33.tar.gz && cd haproxy-2.0.33
+if ! make -j"$(nproc)" TARGET=linux-glibc USE_OPENSSL=1 USE_ZLIB=1 USE_PCRE=1 USE_SYSTEMD=1 >/dev/null 2>&1; then print_error "Build HAProxy gagal, pakai HAProxy bawaan OS"; return 0; fi
+systemctl stop haproxy 2>/dev/null
+cp haproxy /usr/sbin/haproxy && chmod +x /usr/sbin/haproxy
+systemctl daemon-reload 2>/dev/null
+haproxy -v 2>/dev/null | grep -q "2\.0" || { print_error "HAProxy hasil build bukan 2.0, install dibatalkan"; exit 1; }
+apt-mark hold haproxy 2>/dev/null
+print_success "HAProxy 2.0.33 terpasang"
 }
 clear
 function nginx_install() {
