@@ -4,122 +4,257 @@
 REPO="https://raw.githubusercontent.com/ajijainalganteng-wq/v4/main/"
 
 # initialisasi var
-OS=`uname -m`;
-MYIP=$(wget -qO- ipinfo.io/ip);
-MYIP2="s/xxxxxxxxx/$MYIP/g";
-ANU=$(ip -o $ANU -4 route show to default | awk '{print $5}');
+OS=$(uname -m)
+MYIP=$(wget -qO- https://ipinfo.io/ip)
+ANU=$(ip -4 route show default | awk 'NR==1 {print $5}')
 
 # Install OpenVPN dan Easy-RSA
-apt install openvpn easy-rsa unzip -y
-apt install openssl iptables iptables-persistent -y
+export DEBIAN_FRONTEND=noninteractive
+apt update
+apt install openvpn easy-rsa unzip openssl iptables iptables-persistent wget zip -y
+
 mkdir -p /etc/openvpn/server/easy-rsa/
 cd /etc/openvpn/
-wget ${REPO}Cfg/vpn.zip
-unzip vpn.zip
-rm -f vpn.zip
+
+wget -q ${REPO}Cfg/vpn.zip -O vpn.zip
+if [ -s vpn.zip ]; then
+    unzip -o vpn.zip
+    rm -f vpn.zip
+fi
+
 chown -R root:root /etc/openvpn/server/easy-rsa/
 
-cd
+# Membuat CA dan sertifikat OpenVPN jika belum tersedia
+cd /etc/openvpn/server/easy-rsa/
+
+if [ ! -f /etc/openvpn/server/ca.crt ]; then
+    cp -a /usr/share/easy-rsa/. /etc/openvpn/server/easy-rsa/
+    ./easyrsa --batch init-pki
+    ./easyrsa --batch build-ca nopass
+fi
+
+if [ ! -f /etc/openvpn/server/server.crt ] || [ ! -f /etc/openvpn/server/server.key ]; then
+    EASYRSA_REQ_CN=server ./easyrsa --batch gen-req server nopass
+    ./easyrsa --batch sign-req server server
+fi
+
+cp -f pki/ca.crt /etc/openvpn/server/ca.crt
+cp -f pki/issued/server.crt /etc/openvpn/server/server.crt
+cp -f pki/private/server.key /etc/openvpn/server/server.key
+
+chmod 600 /etc/openvpn/server/server.key
+chmod 644 /etc/openvpn/server/ca.crt /etc/openvpn/server/server.crt
+
+# Membuat plugin autentikasi PAM
 mkdir -p /usr/lib/openvpn/
-cp /usr/lib/x86_64-linux-gnu/openvpn/plugins/openvpn-plugin-auth-pam.so /usr/lib/openvpn/openvpn-plugin-auth-pam.so
+
+PLUGIN_SRC=$(find /usr/lib -type f -name openvpn-plugin-auth-pam.so | head -n1)
+
+if [ -n "$PLUGIN_SRC" ]; then
+    cp -f "$PLUGIN_SRC" /usr/lib/openvpn/openvpn-plugin-auth-pam.so
+fi
+
+# Membuat konfigurasi PAM OpenVPN
+cat > /etc/pam.d/openvpn <<'END'
+auth required pam_unix.so
+account required pam_unix.so
+END
+
+# Membuat konfigurasi server TCP 1194
+cat > /etc/openvpn/server/server-tcp.conf <<'END'
+port 1194
+proto tcp-server
+dev tun0
+topology subnet
+
+ca /etc/openvpn/server/ca.crt
+cert /etc/openvpn/server/server.crt
+key /etc/openvpn/server/server.key
+
+dh none
+tls-server
+tls-version-min 1.2
+ecdh-curve prime256v1
+
+verify-client-cert none
+username-as-common-name
+plugin /usr/lib/openvpn/openvpn-plugin-auth-pam.so openvpn
+
+server 10.8.0.0 255.255.255.0
+keepalive 10 60
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+auth SHA256
+
+persist-key
+persist-tun
+user nobody
+group nogroup
+
+verb 3
+END
+
+# Membuat konfigurasi server UDP 1194
+cat > /etc/openvpn/server/server-udp.conf <<'END'
+port 1194
+proto udp
+dev tun1
+topology subnet
+
+ca /etc/openvpn/server/ca.crt
+cert /etc/openvpn/server/server.crt
+key /etc/openvpn/server/server.key
+
+dh none
+tls-server
+tls-version-min 1.2
+ecdh-curve prime256v1
+
+verify-client-cert none
+username-as-common-name
+plugin /usr/lib/openvpn/openvpn-plugin-auth-pam.so openvpn
+
+server 10.9.0.0 255.255.255.0
+keepalive 10 60
+
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+auth SHA256
+
+persist-key
+persist-tun
+user nobody
+group nogroup
+
+verb 3
+END
+
+chmod 600 /etc/openvpn/server/server-tcp.conf
+chmod 600 /etc/openvpn/server/server-udp.conf
 
 # nano /etc/default/openvpn
 sed -i 's/#AUTOSTART="all"/AUTOSTART="all"/g' /etc/default/openvpn
 
 # restart openvpn dan cek status openvpn
-systemctl enable --now openvpn-server@server-tcp
-systemctl enable --now openvpn-server@server-udp
-/etc/init.d/openvpn restart
-/etc/init.d/openvpn status
+systemctl daemon-reload
+systemctl enable openvpn-server@server-tcp
+systemctl enable openvpn-server@server-udp
+systemctl restart openvpn-server@server-tcp
+systemctl restart openvpn-server@server-udp
 
 # aktifkan ip4 forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
-sed -i 's/#net.ipv4.ip_forward=1/net.ipv4.ip_forward=1/g' /etc/sysctl.conf
+
+cat > /etc/sysctl.d/99-openvpn-forward.conf <<'END'
+net.ipv4.ip_forward=1
+END
+
+sysctl --system
 
 # Buat config client TCP 1194
-cat > /etc/openvpn/tcp.ovpn <<-END
+cat > /etc/openvpn/tcp.ovpn <<END
 client
 dev tun
-proto tcp
-remote xxxxxxxxx 1194
+proto tcp-client
+remote ${MYIP} 1194
 resolv-retry infinite
-route-method exe
 nobind
 persist-key
 persist-tun
 auth-user-pass
-comp-lzo
+remote-cert-tls server
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 verb 3
 END
-sed -i $MYIP2 /etc/openvpn/tcp.ovpn;
-cat > /etc/openvpn/udp.ovpn <<-END
+
+cat > /etc/openvpn/udp.ovpn <<END
 client
 dev tun
 proto udp
-remote xxxxxxxxx 2200
+remote ${MYIP} 1194
 resolv-retry infinite
-route-method exe
 nobind
 persist-key
 persist-tun
 auth-user-pass
-comp-lzo
+remote-cert-tls server
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 verb 3
 END
-sed -i $MYIP2 /etc/openvpn/udp.ovpn;
-cat > /etc/openvpn/ws-ssl.ovpn <<-END
-client
-dev tun
-proto tcp
-remote xxxxxxxxx 443
-resolv-retry infinite
-route-method exe
-nobind
-persist-key
-persist-tun
-auth-user-pass
-comp-lzo
-verb 3
-END
-sed -i $MYIP2 /etc/openvpn/ws-ssl.ovpn;
-cat > /etc/openvpn/ssl.ovpn <<-END
-client
-dev tun
-proto tcp
-remote xxxxxxxxx 443
-resolv-retry infinite
-route-method exe
-nobind
-persist-key
-persist-tun
-auth-user-pass
-comp-lzo
-verb 3
-END
-sed -i $MYIP2 /etc/openvpn/ssl.ovpn;
 
-cd
-echo '<ca>' >> /etc/openvpn/tcp.ovpn
-cat /etc/openvpn/server/ca.crt >> /etc/openvpn/tcp.ovpn
-echo '</ca>' >> /etc/openvpn/tcp.ovpn
-cp /etc/openvpn/tcp.ovpn /var/www/html/tcp.ovpn
-echo '<ca>' >> /etc/openvpn/udp.ovpn
-cat /etc/openvpn/server/ca.crt >> /etc/openvpn/udp.ovpn
-echo '</ca>' >> /etc/openvpn/udp.ovpn
-cp /etc/openvpn/udp.ovpn /var/www/html/udp.ovpn
-echo '<ca>' >> /etc/openvpn/ws-ssl.ovpn
-cat /etc/openvpn/server/ca.crt >> /etc/openvpn/ws-ssl.ovpn
-echo '</ca>' >> /etc/openvpn/ws-ssl.ovpn
-cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
-echo '</ca>' >> /etc/openvpn/ssl.ovpn
-cp /etc/openvpn/ws-ssl.ovpn /var/www/html/ssl.ovpn
+cat > /etc/openvpn/ws-ssl.ovpn <<END
+client
+dev tun
+proto tcp-client
+remote ${MYIP} 443
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+auth-user-pass
+remote-cert-tls server
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+verb 3
+END
+
+cat > /etc/openvpn/ssl.ovpn <<END
+client
+dev tun
+proto tcp-client
+remote ${MYIP} 443
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+auth-user-pass
+remote-cert-tls server
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+verb 3
+END
+
+# Memasukkan CA ke dalam konfigurasi client
+for CONFIG in tcp udp ws-ssl ssl; do
+    {
+        echo "<ca>"
+        cat /etc/openvpn/server/ca.crt
+        echo "</ca>"
+    } >> /etc/openvpn/${CONFIG}.ovpn
+done
+
+# Menyalin konfigurasi client ke web directory
+mkdir -p /var/www/html/
+
+cp -f /etc/openvpn/tcp.ovpn /var/www/html/tcp.ovpn
+cp -f /etc/openvpn/udp.ovpn /var/www/html/udp.ovpn
+cp -f /etc/openvpn/ws-ssl.ovpn /var/www/html/ws-ssl.ovpn
+cp -f /etc/openvpn/ssl.ovpn /var/www/html/ssl.ovpn
+
 cd /var/www/html/
-zip Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn 
+zip -q -j -FS Kyt-Project.zip tcp.ovpn udp.ovpn ssl.ovpn ws-ssl.ovpn
 
-#firewall untuk memperbolehkan akses UDP dan akses jalur TCP
+# firewall untuk memperbolehkan akses UDP dan akses jalur TCP
 
-iptables -t nat -I POSTROUTING -s 10.6.0.0/24 -o $ANU -j MASQUERADE
-iptables -t nat -I POSTROUTING -s 10.7.0.0/24 -o $ANU -j MASQUERADE
+# Pengecualian UDP 1194 sebelum DNAT SlowDNS
+iptables -t nat -C PREROUTING -i eth0 -p udp --dport 1194 -j ACCEPT 2>/dev/null || \
+iptables -t nat -I PREROUTING 1 -i eth0 -p udp --dport 1194 -j ACCEPT
+
+# NAT untuk subnet OpenVPN TCP dan UDP
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o $ANU -j MASQUERADE 2>/dev/null || \
+iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $ANU -j MASQUERADE
+
+iptables -t nat -C POSTROUTING -s 10.9.0.0/24 -o $ANU -j MASQUERADE 2>/dev/null || \
+iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o $ANU -j MASQUERADE
+
+# Membuka akses firewall TCP dan UDP 1194
+iptables -C INPUT -p tcp --dport 1194 -j ACCEPT 2>/dev/null || \
+iptables -I INPUT -p tcp --dport 1194 -j ACCEPT
+
+iptables -C INPUT -p udp --dport 1194 -j ACCEPT 2>/dev/null || \
+iptables -I INPUT -p udp --dport 1194 -j ACCEPT
+
 iptables-save > /etc/iptables.up.rules
 chmod +x /etc/iptables.up.rules
 
@@ -128,9 +263,12 @@ netfilter-persistent save
 netfilter-persistent reload
 
 # Restart service openvpn
-systemctl enable openvpn
-systemctl start openvpn
-/etc/init.d/openvpn restart
+systemctl restart openvpn-server@server-tcp
+systemctl restart openvpn-server@server-udp
+
+# Cek status OpenVPN
+systemctl --no-pager --full status openvpn-server@server-tcp
+systemctl --no-pager --full status openvpn-server@server-udp
 
 # Delete script
 history -c
