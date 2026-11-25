@@ -1,229 +1,71 @@
 #!/bin/bash
-# install_dropbear2019.sh
-# Dropbear 2019.78 - Source Build + Custom Systemd Service
-# Synced with OpenVPN TCP/UDP services
 
-set -Eeuo pipefail
+echo "=== INSTALL DROPBEAR 2019.78 ==="
+apt purge -y dropbear
+rm -f /usr/sbin/dropbear
+# STOP DROPBEAR LAMA
+systemctl stop dropbear 2>/dev/null
+apt remove -y dropbear 2>/dev/null
 
-VERSION="2019.78"
-URL="https://github.com/mkj/dropbear/archive/refs/tags/DROPBEAR_${VERSION}.tar.gz"
+# DEPENDENCY
+apt update -y
+apt install -y build-essential zlib1g-dev
 
-echo "[Dropbear] Menghentikan service lama..."
-systemctl stop dropbear 2>/dev/null || true
+# DOWNLOAD SOURCE
+cd /usr/local/src
+rm -rf dropbear-2019.78*
+wget https://matt.ucc.asn.au/dropbear/releases/dropbear-2019.78.tar.bz2
+tar -xjf dropbear-2019.78.tar.bz2
+cd dropbear-2019.78
 
-echo "[Dropbear] Menginstal dependensi..."
-apt-get update -y || true
-apt-get install -y build-essential zlib1g-dev libtomcrypt-dev \
-    libtommath-dev wget ca-certificates autoconf openssh-client
+# BUILD
+./configure
+make -j$(nproc)
+make install
 
-apt-get install -y libcrypt-dev 2>/dev/null || \
-apt-get install -y libxcrypt-dev 2>/dev/null || true
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
-
-cd "$TMPDIR"
-
-echo "[Dropbear] Download source ${VERSION}..."
-
-DL_OK=0
-for i in 1 2 3; do
-    if wget --timeout=30 --tries=2 -q "$URL" -O dropbear.tar.gz &&
-       tar tzf dropbear.tar.gz >/dev/null 2>&1; then
-        DL_OK=1
-        break
-    fi
-    sleep 5
-done
-
-[ "$DL_OK" = 1 ] || {
-    echo "[ERROR] Gagal mengunduh source Dropbear."
-    exit 1
-}
-
-tar xzf dropbear.tar.gz
-cd "dropbear-DROPBEAR_${VERSION}"
-
-# Generate configure files jika belum tersedia
-if [ ! -f configure ]; then
-    autoconf
-fi
-
-if [ ! -f config.h.in ]; then
-    autoheader
-fi
-
-echo "[Dropbear] Mengaktifkan algoritma legacy..."
-
-sed -i 's/^#define DROPBEAR_ENABLE_CBC_MODE 0/#define DROPBEAR_ENABLE_CBC_MODE 1/' default_options.h
-sed -i 's/^#define DROPBEAR_3DES 0/#define DROPBEAR_3DES 1/' default_options.h
-sed -i 's/^#define DROPBEAR_SHA1_96_HMAC 0/#define DROPBEAR_SHA1_96_HMAC 1/' default_options.h
-sed -i 's/^#define DROPBEAR_DH_GROUP1_CLIENTONLY 1/#define DROPBEAR_DH_GROUP1_CLIENTONLY 0/' default_options.h
-
-echo "[Dropbear] Build source..."
-
-if ! ./configure --prefix=/usr --sysconfdir=/etc --disable-pam >/dev/null 2>&1 ||
-   ! make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert" >/dev/null 2>&1; then
-
-    echo "[Dropbear] Mencoba bundled libtom..."
-
-    make distclean >/dev/null 2>&1 || true
-
-    ./configure --prefix=/usr --sysconfdir=/etc \
-        --disable-pam --enable-bundled-libtom
-
-    make -j"$(nproc)" PROGRAMS="dropbear dropbearkey dropbearconvert"
-fi
-
-echo "[Dropbear] Memasang binary..."
-
-install -D -m 0755 dropbear /usr/sbin/dropbear
-install -D -m 0755 dropbearkey /usr/sbin/dropbearkey
-install -D -m 0755 dropbearconvert /usr/sbin/dropbearconvert
-
-# Pastikan binary tersedia
-test -x /usr/sbin/dropbear
-test -x /usr/sbin/dropbearkey
-
-echo "[Dropbear] Membuat host key..."
-
+# HOSTKEY
 mkdir -p /etc/dropbear
+dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
+dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
 
-[ -s /etc/dropbear/dropbear_rsa_host_key ] ||
-    /usr/sbin/dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key
-
-[ -s /etc/dropbear/dropbear_ecdsa_host_key ] ||
-    /usr/sbin/dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
-
-[ -s /etc/dropbear/dropbear_dss_host_key ] ||
-    /usr/sbin/dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
-
-chmod 600 /etc/dropbear/dropbear_*_host_key
-
-# Jangan menimpa banner yang sudah dibuat pengguna
-touch /etc/banner.txt
-
-echo "[Dropbear] Menyinkronkan konfigurasi..."
-
-cat > /etc/default/dropbear <<'EOF'
-NO_START=0
-DROPBEAR_PORT=143
-DROPBEAR_EXTRA_ARGS="-p 109 -W 65536 -I 60 -b /etc/banner.txt"
-DROPBEAR_BANNER="/etc/banner.txt"
-DROPBEAR_RECEIVE_WINDOW=65536
-EOF
-
-chmod 644 /etc/default/dropbear
-
-# =========================================================
-# SYSTEMD SERVICE - SINKRON DENGAN OPENVPN
-# =========================================================
-
-echo "[Dropbear] Membuat systemd service..."
-
-cat > /etc/systemd/system/dropbear.service <<'EOF'
+# SERVICE
+cat > /etc/systemd/system/dropbear.service <<EOL
 [Unit]
-Description=Dropbear SSH Server 2019.78
-Wants=network-online.target
-After=network-online.target
+Description=Dropbear SSH Server (2019)
+After=network.target
 
 [Service]
-Type=simple
-ExecStart=/usr/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -r /etc/dropbear/dropbear_dss_host_key
-Restart=on-failure
-RestartSec=3
-StartLimitIntervalSec=0
+ExecStart=/usr/sbin/dropbear -EF -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt
+Restart=always
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
-echo "[Dropbear] Mencegah apt menimpa paket..."
-
-apt-mark hold dropbear dropbear-bin >/dev/null 2>&1 || true
-
-# =========================================================
-# ENABLE + RESTART DROPBEAR
-# =========================================================
-
-echo "[Dropbear] Mengaktifkan service..."
-
+# ENABLE
+systemctl daemon-reexec
 systemctl daemon-reload
-systemctl reset-failed dropbear 2>/dev/null || true
 systemctl enable dropbear
+systemctl restart dropbear
 
-if ! systemctl restart dropbear; then
-    echo "[ERROR] Restart Dropbear gagal!"
-    journalctl -u dropbear -n 40 --no-pager
-    exit 1
-fi
-
-# Tunggu service aktif
-RUNNING=0
-
-for i in $(seq 1 15); do
-    if systemctl is-active --quiet dropbear; then
-        RUNNING=1
-        break
-    fi
-    sleep 1
-done
-
-if [ "$RUNNING" -ne 1 ]; then
-    echo "[ERROR] Dropbear gagal running!"
-    systemctl status dropbear --no-pager -l || true
-    journalctl -u dropbear -n 40 --no-pager
-    exit 1
-fi
-
-echo "[Dropbear] Memeriksa banner..."
-
-BANNER=$(timeout 5 bash -c \
-    'exec 3<>/dev/tcp/127.0.0.1/143; head -n 1 <&3' \
-    2>/dev/null || true)
-
-echo "Banner: $BANNER"
-
-case "$BANNER" in
-    *dropbear_2019.78*)
-        echo "[OK] Dropbear 2019.78 aktif."
-        ;;
-    *)
-        echo "[ERROR] Banner versi tidak sesuai!"
-        journalctl -u dropbear -n 30 --no-pager
-        exit 1
-        ;;
-esac
-
-# =========================================================
-# FINAL STATUS
-# =========================================================
-
+# CHECK
+sleep 1
 echo ""
-echo "===== DROPBEAR VERSION ====="
-/usr/sbin/dropbear -V
-
-echo ""
-echo "===== DROPBEAR SERVICE ====="
+echo "=== STATUS ==="
 systemctl status dropbear --no-pager -l
 
 echo ""
-echo "===== DROPBEAR PORT ====="
-ss -tulpn | grep dropbear || true
+echo "=== PORT ==="
+ss -tulpn | grep dropbear
 
 echo ""
-echo "===== OPENVPN SERVICE CHECK ====="
-
-for SERVICE in \
-    openvpn-server@server-tcp \
-    openvpn-server@server-udp
-do
-    if systemctl is-active --quiet "$SERVICE"; then
-        echo "[OK] $SERVICE RUNNING"
-    else
-        echo "[INFO] $SERVICE belum aktif atau belum terpasang."
-    fi
-done
+echo "=== VERSION ==="
+/usr/sbin/dropbear -V
 
 echo ""
-echo "[SUCCESS] Dropbear 2019.78 selesai disinkronkan."
+echo "=== DONE ==="
+
+EOF
+
+
+ln -s /usr/sbin/dropbear /usr/sbin/dropbear
