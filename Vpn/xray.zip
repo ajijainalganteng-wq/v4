@@ -693,12 +693,13 @@ print_success "SSHD"
 clear
 function ins_dropbear(){
 clear
-print_install "Menginstall Dropbear"
-apt-get install dropbear -y > /dev/null 2>&1
-wget -q -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
-chmod +x /etc/default/dropbear
+apt -y install dropbear
+sudo dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
+sudo chmod 600 /etc/dropbear/dropbear_dss_host_key
+wget -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+echo "/bin/false" >> /etc/shells
+echo "/usr/sbin/nologin" >> /etc/shells
 /etc/init.d/dropbear restart
-systemctl restart dropbear
 /etc/init.d/dropbear status
 print_success "Dropbear"
 }
