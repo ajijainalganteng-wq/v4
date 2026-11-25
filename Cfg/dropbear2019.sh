@@ -37,7 +37,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin/dropbear -EF -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
+ExecStart=/usr/local/sbin/dropbear -EF -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
 Restart=always
 RestartSec=3
 
@@ -62,7 +62,7 @@ ss -tulpn | grep dropbear
 
 echo ""
 echo "=== VERSION ==="
-/usr/sbin/dropbear -V
+/usr/local/sbin/dropbear -V
 
 echo ""
 echo "=== DONE ==="
