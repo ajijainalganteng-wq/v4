@@ -648,10 +648,11 @@ clear
 apt -y install dropbear
 sudo dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
 sudo chmod 600 /etc/dropbear/dropbear_dss_host_key
-wget -O /etc/default/dropbear "${REPO}Cfg/dropbear.conf"
+wget -O /etc/default/dropbear "${REPO}Cfg/dropbear"
 echo "/bin/false" >> /etc/shells
 echo "/usr/sbin/nologin" >> /etc/shells
 /etc/init.d/dropbear restart
+systemctl restart dropbear
 /etc/init.d/dropbear status
 print_success "Dropbear"
 }
