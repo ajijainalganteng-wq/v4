@@ -664,7 +664,7 @@ Description=Dropbear SSH Server 2019.78
 After=network.target
 [Service]
 Type=simple
-ExecStart=/usr/sbin/dropbear -F -E -p 109 -p 143 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -r /etc/dropbear/dropbear_dss_host_key
+ExecStart=/usr/sbin/dropbear -F -E -p 109 -W 65536 -I 60 -b /etc/banner.txt -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key -r /etc/dropbear/dropbear_dss_host_key
 Restart=on-failure
 RestartSec=3
 [Install]
